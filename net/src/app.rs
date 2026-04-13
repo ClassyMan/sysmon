@@ -1,0 +1,223 @@
+use anyhow::Result;
+
+use crate::collector::{self, InterfaceInfo, NetRates, NetSnapshot};
+use sysmon_shared::ring_buffer::RingBuffer;
+use sysmon_shared::sticky_max::StickyMax;
+
+const FAST_REFRESH_MS: u64 = 25;
+const FAST_SCROLLBACK_SECS: u64 = 3;
+
+pub struct App {
+    pub rx_history: RingBuffer,
+    pub tx_history: RingBuffer,
+    pub latest_rates: Option<NetRates>,
+    pub interfaces: Vec<InterfaceInfo>,
+    pub selected_interface: usize,
+    pub should_quit: bool,
+    pub scrollback_secs: u64,
+    pub fast_mode: bool,
+    pub refresh_ms: u64,
+    pub rx_y: StickyMax,
+    pub tx_y: StickyMax,
+    normal_refresh_ms: u64,
+    normal_scrollback_secs: u64,
+    prev_snapshot: Option<NetSnapshot>,
+}
+
+impl App {
+    pub fn new(refresh_ms: u64, scrollback_secs: u64) -> Self {
+        let capacity = min_capacity(refresh_ms, scrollback_secs);
+        let interfaces = collector::list_interfaces();
+        Self {
+            rx_history: RingBuffer::new(capacity),
+            tx_history: RingBuffer::new(capacity),
+            latest_rates: None,
+            interfaces,
+            selected_interface: 0,
+            should_quit: false,
+            scrollback_secs,
+            fast_mode: false,
+            refresh_ms,
+            rx_y: StickyMax::new(),
+            tx_y: StickyMax::new(),
+            normal_refresh_ms: refresh_ms,
+            normal_scrollback_secs: scrollback_secs,
+            prev_snapshot: None,
+        }
+    }
+
+    pub fn selected_name(&self) -> &str {
+        self.interfaces
+            .get(self.selected_interface)
+            .map(|i| i.name.as_str())
+            .unwrap_or("?")
+    }
+
+    pub fn selected_info(&self) -> Option<&InterfaceInfo> {
+        self.interfaces.get(self.selected_interface)
+    }
+
+    pub fn chart_capacity(&self) -> usize {
+        self.rx_history.capacity()
+    }
+
+    pub fn next_interface(&mut self) {
+        if !self.interfaces.is_empty() {
+            self.selected_interface = (self.selected_interface + 1) % self.interfaces.len();
+            self.reset_data();
+        }
+    }
+
+    pub fn prev_interface(&mut self) {
+        if !self.interfaces.is_empty() {
+            self.selected_interface = if self.selected_interface == 0 {
+                self.interfaces.len() - 1
+            } else {
+                self.selected_interface - 1
+            };
+            self.reset_data();
+        }
+    }
+
+    pub fn toggle_fast_mode(&mut self) {
+        self.fast_mode = !self.fast_mode;
+
+        let (new_refresh, new_scrollback) = if self.fast_mode {
+            (FAST_REFRESH_MS, FAST_SCROLLBACK_SECS)
+        } else {
+            (self.normal_refresh_ms, self.normal_scrollback_secs)
+        };
+
+        self.refresh_ms = new_refresh;
+        self.scrollback_secs = new_scrollback;
+        self.reset_data();
+
+        let capacity = min_capacity(new_refresh, new_scrollback);
+        self.rx_history = RingBuffer::new(capacity);
+        self.tx_history = RingBuffer::new(capacity);
+    }
+
+    pub fn refresh_rate(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.refresh_ms)
+    }
+
+    pub fn tick(&mut self) -> Result<()> {
+        let name = self.selected_name().to_string();
+        let snapshot = collector::read_net_snapshot(&name)?;
+
+        if let Some(prev) = &self.prev_snapshot {
+            let interval_secs = self.refresh_ms as f64 / 1000.0;
+            let rates = NetRates::from_deltas(prev, &snapshot, interval_secs);
+
+            self.rx_history.push(rates.rx_bytes_per_sec);
+            self.tx_history.push(rates.tx_bytes_per_sec);
+            self.rx_y.update(self.rx_history.max());
+            self.tx_y.update(self.tx_history.max());
+
+            self.latest_rates = Some(rates);
+        }
+
+        self.prev_snapshot = Some(snapshot);
+        Ok(())
+    }
+
+    fn reset_data(&mut self) {
+        let capacity = min_capacity(self.refresh_ms, self.scrollback_secs);
+        self.rx_history = RingBuffer::new(capacity);
+        self.tx_history = RingBuffer::new(capacity);
+        self.rx_y.reset();
+        self.tx_y.reset();
+        self.prev_snapshot = None;
+        self.latest_rates = None;
+    }
+}
+
+fn compute_capacity(refresh_ms: u64, scrollback_secs: u64, term_width: usize) -> usize {
+    let time_based = ((scrollback_secs * 1000) / refresh_ms) as usize;
+    time_based.max(term_width)
+}
+
+fn min_capacity(refresh_ms: u64, scrollback_secs: u64) -> usize {
+    let term_width = crossterm::terminal::size()
+        .map(|(w, _)| w as usize)
+        .unwrap_or(200);
+    compute_capacity(refresh_ms, scrollback_secs, term_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl App {
+        pub fn with_capacity(capacity: usize) -> Self {
+            Self {
+                rx_history: RingBuffer::new(capacity),
+                tx_history: RingBuffer::new(capacity),
+                latest_rates: None,
+                interfaces: vec![
+                    InterfaceInfo {
+                        name: "eth0".to_string(),
+                        ip: "192.168.1.1".to_string(),
+                        speed_mbps: Some(1000),
+                        operstate: "up".to_string(),
+                    },
+                    InterfaceInfo {
+                        name: "wlan0".to_string(),
+                        ip: "192.168.1.2".to_string(),
+                        speed_mbps: None,
+                        operstate: "up".to_string(),
+                    },
+                ],
+                selected_interface: 0,
+                should_quit: false,
+                scrollback_secs: 60,
+                fast_mode: false,
+                refresh_ms: 500,
+                rx_y: StickyMax::new(),
+                tx_y: StickyMax::new(),
+                normal_refresh_ms: 500,
+                normal_scrollback_secs: 60,
+                prev_snapshot: None,
+            }
+        }
+    }
+
+    #[test]
+    fn test_initial_state() {
+        let app = App::with_capacity(100);
+        assert_eq!(app.selected_name(), "eth0");
+        assert!(!app.fast_mode);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn test_next_interface_wraps() {
+        let mut app = App::with_capacity(100);
+        assert_eq!(app.selected_interface, 0);
+        app.next_interface();
+        assert_eq!(app.selected_interface, 1);
+        app.next_interface();
+        assert_eq!(app.selected_interface, 0);
+    }
+
+    #[test]
+    fn test_prev_interface_wraps() {
+        let mut app = App::with_capacity(100);
+        app.prev_interface();
+        assert_eq!(app.selected_interface, 1);
+    }
+
+    #[test]
+    fn test_toggle_fast_mode() {
+        let mut app = App::with_capacity(100);
+        app.toggle_fast_mode();
+        assert!(app.fast_mode);
+        assert_eq!(app.refresh_ms, FAST_REFRESH_MS);
+    }
+
+    #[test]
+    fn test_compute_capacity_takes_larger() {
+        assert_eq!(compute_capacity(500, 60, 80), 120);
+        assert_eq!(compute_capacity(25, 3, 200), 200);
+    }
+}

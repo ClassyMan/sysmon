@@ -1,0 +1,13 @@
+[package]
+name = "net"
+version = "0.1.0"
+edition = "2024"
+description = "Network activity visualizer with mirrored waveform display"
+license = "MIT"
+
+[dependencies]
+sysmon-shared = { path = "../shared" }
+ratatui = "0.30"
+crossterm = "0.29"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
