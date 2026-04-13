@@ -1,8 +1,15 @@
 use anyhow::Result;
 
 use crate::collector::{self, InterfaceInfo, NetRates, NetSnapshot};
+use crate::rain::RainState;
 use sysmon_shared::ring_buffer::RingBuffer;
 use sysmon_shared::sticky_max::StickyMax;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    Charts,
+    Rain,
+}
 
 const FAST_REFRESH_MS: u64 = 25;
 const FAST_SCROLLBACK_SECS: u64 = 3;
@@ -19,6 +26,8 @@ pub struct App {
     pub refresh_ms: u64,
     pub rx_y: StickyMax,
     pub tx_y: StickyMax,
+    pub view_mode: ViewMode,
+    pub rain: RainState,
     normal_refresh_ms: u64,
     normal_scrollback_secs: u64,
     prev_snapshot: Option<NetSnapshot>,
@@ -40,6 +49,8 @@ impl App {
             refresh_ms,
             rx_y: StickyMax::new(),
             tx_y: StickyMax::new(),
+            view_mode: ViewMode::Charts,
+            rain: RainState::new(),
             normal_refresh_ms: refresh_ms,
             normal_scrollback_secs: scrollback_secs,
             prev_snapshot: None,
@@ -97,6 +108,13 @@ impl App {
         self.tx_history = RingBuffer::new(capacity);
     }
 
+    pub fn toggle_view(&mut self) {
+        self.view_mode = match self.view_mode {
+            ViewMode::Charts => ViewMode::Rain,
+            ViewMode::Rain => ViewMode::Charts,
+        };
+    }
+
     pub fn refresh_rate(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.refresh_ms)
     }
@@ -118,6 +136,14 @@ impl App {
         }
 
         self.prev_snapshot = Some(snapshot);
+
+        if self.view_mode == ViewMode::Rain {
+            let (term_width, term_height) = crossterm::terminal::size().unwrap_or((80, 24));
+            let rx = self.latest_rates.as_ref().map_or(0.0, |r| r.rx_bytes_per_sec);
+            let tx = self.latest_rates.as_ref().map_or(0.0, |r| r.tx_bytes_per_sec);
+            self.rain.tick(term_width, term_height.saturating_sub(8), rx, tx);
+        }
+
         Ok(())
     }
 
@@ -129,6 +155,7 @@ impl App {
         self.tx_y.reset();
         self.prev_snapshot = None;
         self.latest_rates = None;
+        self.rain = RainState::new();
     }
 }
 
@@ -175,6 +202,8 @@ mod tests {
                 refresh_ms: 500,
                 rx_y: StickyMax::new(),
                 tx_y: StickyMax::new(),
+                view_mode: ViewMode::Charts,
+                rain: RainState::new(),
                 normal_refresh_ms: 500,
                 normal_scrollback_secs: 60,
                 prev_snapshot: None,

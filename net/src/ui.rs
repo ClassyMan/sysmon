@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 
-use crate::app::App;
+use crate::app::{App, ViewMode};
 use crate::collector::human_rate;
 use sysmon_shared::line_chart::{self, LineChart};
 
@@ -25,7 +25,10 @@ pub fn render(frame: &mut Frame, app: &App) {
         .split(frame.area());
 
     draw_header(frame, outer[0], app);
-    draw_charts(frame, outer[1], app);
+    match app.view_mode {
+        ViewMode::Charts => draw_charts(frame, outer[1], app),
+        ViewMode::Rain => draw_rain(frame, outer[1], app),
+    }
     draw_rx_gauge(frame, outer[2], app);
     draw_tx_gauge(frame, outer[3], app);
 }
@@ -117,6 +120,71 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(rx_chart, rx_area);
     frame.render_widget(tx_chart, tx_area);
+}
+
+fn draw_rain(frame: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(BORDER_COLOR));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if inner.height < 2 || inner.width < 2 {
+        return;
+    }
+
+    let half = inner.height / 2;
+    let divider_row = inner.y + half;
+
+    // Draw faint divider line
+    let buf = frame.buffer_mut();
+    for col in inner.x..inner.right() {
+        if let Some(cell) = buf.cell_mut((col, divider_row)) {
+            cell.set_char('·');
+            cell.set_style(Style::default().fg(Color::Rgb(40, 40, 40)));
+        }
+    }
+
+    // Draw labels on divider
+    let rx_label = format!(" RX {} ", app.latest_rates.as_ref()
+        .map_or("--".to_string(), |r| human_rate(r.rx_bytes_per_sec)));
+    let tx_label = format!(" TX {} ", app.latest_rates.as_ref()
+        .map_or("--".to_string(), |r| human_rate(r.tx_bytes_per_sec)));
+
+    buf.set_string(
+        inner.x + 1,
+        divider_row,
+        &rx_label,
+        Style::default().fg(RX_COLOR).add_modifier(Modifier::BOLD),
+    );
+    let tx_x = inner.right().saturating_sub(tx_label.len() as u16 + 1);
+    buf.set_string(
+        tx_x,
+        divider_row,
+        &tx_label,
+        Style::default().fg(TX_COLOR).add_modifier(Modifier::BOLD),
+    );
+
+    // Render drops
+    for drop in &app.rain.drops {
+        let abs_row = if drop.is_rx {
+            inner.y + drop.row()
+        } else {
+            inner.y + drop.row()
+        };
+
+        if abs_row < inner.y || abs_row >= inner.bottom() || abs_row == divider_row {
+            continue;
+        }
+        if drop.col < inner.x || drop.col >= inner.right() {
+            continue;
+        }
+
+        if let Some(cell) = buf.cell_mut((drop.col, abs_row)) {
+            cell.set_char(drop.char());
+            cell.set_style(Style::default().fg(drop.color()));
+        }
+    }
 }
 
 fn draw_rx_gauge(frame: &mut Frame, area: Rect, app: &App) {

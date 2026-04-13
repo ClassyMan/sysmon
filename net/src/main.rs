@@ -1,5 +1,6 @@
 mod app;
 mod collector;
+mod rain;
 mod ui;
 
 use std::io;
@@ -83,6 +84,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Resul
                         app.toggle_fast_mode();
                         last_tick = Instant::now();
                     }
+                    KeyCode::Char('v') => app.toggle_view(),
                     KeyCode::Char('d') | KeyCode::Right => app.next_interface(),
                     KeyCode::Char('D') | KeyCode::Left => app.prev_interface(),
                     _ => {}
