@@ -306,7 +306,10 @@ fn read_dmidecode_dimms() -> Vec<DimmInfo> {
 
 pub fn read_meminfo() -> Result<MemInfo> {
     let content = fs::read_to_string("/proc/meminfo")?;
+    parse_meminfo(&content)
+}
 
+pub fn parse_meminfo(content: &str) -> Result<MemInfo> {
     let mut mem_total: u64 = 0;
     let mut mem_available: u64 = 0;
     let mut swap_total: u64 = 0;
@@ -342,7 +345,10 @@ pub fn read_meminfo() -> Result<MemInfo> {
 
 pub fn read_vmstat() -> Result<VmStatSnapshot> {
     let content = fs::read_to_string("/proc/vmstat")?;
+    parse_vmstat(&content)
+}
 
+pub fn parse_vmstat(content: &str) -> Result<VmStatSnapshot> {
     let mut snap = VmStatSnapshot::default();
 
     for line in content.lines() {
@@ -368,6 +374,10 @@ pub fn read_vmstat() -> Result<VmStatSnapshot> {
 
 pub fn read_psi() -> Result<PsiSnapshot> {
     let content = fs::read_to_string("/proc/pressure/memory")?;
+    parse_psi(&content)
+}
+
+pub fn parse_psi(content: &str) -> Result<PsiSnapshot> {
     let mut snap = PsiSnapshot::default();
 
     for line in content.lines() {
@@ -454,6 +464,73 @@ fn pct(used: u64, total: u64) -> f64 {
 mod tests {
     use super::*;
 
+    const REALISTIC_MEMINFO: &str = "\
+MemTotal:       32768000 kB
+MemFree:         1024000 kB
+MemAvailable:   16384000 kB
+Buffers:          512000 kB
+Cached:         12288000 kB
+SwapCached:        10240 kB
+Active:         14000000 kB
+Inactive:        8000000 kB
+SwapTotal:       8388608 kB
+SwapFree:        7340032 kB
+Dirty:             12800 kB
+Writeback:          2048 kB
+AnonPages:       9000000 kB
+Mapped:          2000000 kB
+Shmem:           1500000 kB
+";
+
+    const REALISTIC_VMSTAT: &str = "\
+nr_free_pages 262144
+nr_zone_inactive_anon 1000000
+pgalloc_dma 500
+pgalloc_dma32 150000
+pgalloc_normal 9000000
+pgalloc_movable 50000
+pgfree 9500000
+pgfault 25000000
+pgmajfault 1234
+pswpin 5678
+pswpout 9012
+pgsteal_kswapd 100000
+";
+
+    const REALISTIC_PSI: &str = "\
+some avg10=2.50 avg60=1.20 avg300=0.80 total=98765432
+full avg10=0.30 avg60=0.10 avg300=0.05 total=12345678
+";
+
+    const MEMINFO_NO_SWAP: &str = "\
+MemTotal:       16384000 kB
+MemFree:          512000 kB
+MemAvailable:    4096000 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+";
+
+    const VMSTAT_SINGLE_ZONE: &str = "\
+pgalloc_normal 5000000
+pgfree 4800000
+pgfault 10000000
+pgmajfault 42
+pswpin 0
+pswpout 0
+";
+
+    const PSI_IDLE: &str = "\
+some avg10=0.00 avg60=0.00 avg300=0.00 total=0
+full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+";
+
+    const PSI_HEAVY_PRESSURE: &str = "\
+some avg10=45.20 avg60=30.00 avg300=15.00 total=500000000
+full avg10=22.80 avg60=12.00 avg300=6.00 total=250000000
+";
+
     #[test]
     fn test_percentages() {
         let info = MemInfo {
@@ -534,5 +611,342 @@ mod tests {
         assert!(rates.free_mb_per_sec > 0.0);
         assert!((rates.fault_per_sec - 500.0).abs() < 0.01);
         assert!((rates.major_fault_per_sec - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_meminfo_realistic() {
+        let info = parse_meminfo(REALISTIC_MEMINFO).unwrap();
+        assert_eq!(info.ram_total_kb, 32_768_000);
+        assert_eq!(info.ram_used_kb, 32_768_000 - 16_384_000);
+        assert_eq!(info.swap_total_kb, 8_388_608);
+        assert_eq!(info.swap_used_kb, 8_388_608 - 7_340_032);
+        assert_eq!(info.dirty_kb, 12_800);
+        assert_eq!(info.writeback_kb, 2_048);
+    }
+
+    #[test]
+    fn test_parse_meminfo_no_swap() {
+        let info = parse_meminfo(MEMINFO_NO_SWAP).unwrap();
+        assert_eq!(info.ram_total_kb, 16_384_000);
+        assert_eq!(info.ram_used_kb, 16_384_000 - 4_096_000);
+        assert_eq!(info.swap_total_kb, 0);
+        assert_eq!(info.swap_used_kb, 0);
+        assert_eq!(info.dirty_kb, 0);
+        assert_eq!(info.writeback_kb, 0);
+    }
+
+    #[test]
+    fn test_parse_meminfo_empty_input() {
+        let info = parse_meminfo("").unwrap();
+        assert_eq!(info.ram_total_kb, 0);
+        assert_eq!(info.ram_used_kb, 0);
+        assert_eq!(info.swap_total_kb, 0);
+        assert_eq!(info.swap_used_kb, 0);
+    }
+
+    #[test]
+    fn test_parse_meminfo_ignores_unknown_keys() {
+        let content = "SomeOtherField: 99999 kB\nMemTotal: 8000000 kB\n";
+        let info = parse_meminfo(content).unwrap();
+        assert_eq!(info.ram_total_kb, 8_000_000);
+    }
+
+    #[test]
+    fn test_parse_meminfo_used_never_underflows() {
+        let content = "\
+MemTotal:       1000 kB
+MemAvailable:   5000 kB
+SwapTotal:       100 kB
+SwapFree:        500 kB
+Dirty:             0 kB
+Writeback:         0 kB
+";
+        let info = parse_meminfo(content).unwrap();
+        assert_eq!(info.ram_used_kb, 0, "saturating_sub should prevent underflow");
+        assert_eq!(info.swap_used_kb, 0, "saturating_sub should prevent underflow");
+    }
+
+    #[test]
+    fn test_parse_vmstat_realistic() {
+        let snap = parse_vmstat(REALISTIC_VMSTAT).unwrap();
+        let expected_pgalloc = 500 + 150_000 + 9_000_000 + 50_000;
+        assert_eq!(snap.pgalloc_total, expected_pgalloc);
+        assert_eq!(snap.pgfree, 9_500_000);
+        assert_eq!(snap.pgfault, 25_000_000);
+        assert_eq!(snap.pgmajfault, 1_234);
+        assert_eq!(snap.pswpin, 5_678);
+        assert_eq!(snap.pswpout, 9_012);
+    }
+
+    #[test]
+    fn test_parse_vmstat_single_zone() {
+        let snap = parse_vmstat(VMSTAT_SINGLE_ZONE).unwrap();
+        assert_eq!(snap.pgalloc_total, 5_000_000);
+        assert_eq!(snap.pgfree, 4_800_000);
+        assert_eq!(snap.pgfault, 10_000_000);
+        assert_eq!(snap.pgmajfault, 42);
+        assert_eq!(snap.pswpin, 0);
+        assert_eq!(snap.pswpout, 0);
+    }
+
+    #[test]
+    fn test_parse_vmstat_accumulates_pgalloc_zones() {
+        let content = "\
+pgalloc_dma 100
+pgalloc_dma32 200
+pgalloc_normal 300
+pgalloc_movable 400
+";
+        let snap = parse_vmstat(content).unwrap();
+        assert_eq!(snap.pgalloc_total, 1000);
+    }
+
+    #[test]
+    fn test_parse_vmstat_empty_input() {
+        let snap = parse_vmstat("").unwrap();
+        assert_eq!(snap.pgalloc_total, 0);
+        assert_eq!(snap.pgfree, 0);
+        assert_eq!(snap.pgfault, 0);
+        assert_eq!(snap.pgmajfault, 0);
+        assert_eq!(snap.pswpin, 0);
+        assert_eq!(snap.pswpout, 0);
+    }
+
+    #[test]
+    fn test_parse_vmstat_ignores_unknown_keys() {
+        let content = "nr_free_pages 999999\npgfault 42\nnr_dirty 500\n";
+        let snap = parse_vmstat(content).unwrap();
+        assert_eq!(snap.pgfault, 42);
+        assert_eq!(snap.pgalloc_total, 0);
+    }
+
+    #[test]
+    fn test_parse_psi_realistic() {
+        let snap = parse_psi(REALISTIC_PSI).unwrap();
+        assert!((snap.some_avg10 - 2.50).abs() < 0.001);
+        assert!((snap.full_avg10 - 0.30).abs() < 0.001);
+        assert_eq!(snap.some_total_us, 98_765_432);
+        assert_eq!(snap.full_total_us, 12_345_678);
+    }
+
+    #[test]
+    fn test_parse_psi_idle() {
+        let snap = parse_psi(PSI_IDLE).unwrap();
+        assert!((snap.some_avg10 - 0.0).abs() < 0.001);
+        assert!((snap.full_avg10 - 0.0).abs() < 0.001);
+        assert_eq!(snap.some_total_us, 0);
+        assert_eq!(snap.full_total_us, 0);
+    }
+
+    #[test]
+    fn test_parse_psi_heavy_pressure() {
+        let snap = parse_psi(PSI_HEAVY_PRESSURE).unwrap();
+        assert!((snap.some_avg10 - 45.20).abs() < 0.001);
+        assert!((snap.full_avg10 - 22.80).abs() < 0.001);
+        assert_eq!(snap.some_total_us, 500_000_000);
+        assert_eq!(snap.full_total_us, 250_000_000);
+    }
+
+    #[test]
+    fn test_parse_psi_empty_input() {
+        let snap = parse_psi("").unwrap();
+        assert!((snap.some_avg10 - 0.0).abs() < 0.001);
+        assert!((snap.full_avg10 - 0.0).abs() < 0.001);
+        assert_eq!(snap.some_total_us, 0);
+        assert_eq!(snap.full_total_us, 0);
+    }
+
+    #[test]
+    fn test_parse_psi_ignores_unknown_lines() {
+        let content = "\
+some avg10=1.00 avg60=0.50 avg300=0.10 total=100
+garbage line here
+full avg10=0.50 avg60=0.20 avg300=0.05 total=50
+";
+        let snap = parse_psi(content).unwrap();
+        assert!((snap.some_avg10 - 1.00).abs() < 0.001);
+        assert!((snap.full_avg10 - 0.50).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_meminfo_dirty_writeback_kb() {
+        let info = parse_meminfo(REALISTIC_MEMINFO).unwrap();
+        assert_eq!(info.dirty_writeback_kb(), 12_800 + 2_048);
+    }
+
+    #[test]
+    fn test_meminfo_dirty_writeback_kb_both_zero() {
+        let info = parse_meminfo(MEMINFO_NO_SWAP).unwrap();
+        assert_eq!(info.dirty_writeback_kb(), 0);
+    }
+
+    #[test]
+    fn test_meminfo_dirty_label() {
+        let info = MemInfo {
+            ram_total_kb: 32_768_000,
+            ram_used_kb: 16_384_000,
+            swap_total_kb: 0,
+            swap_used_kb: 0,
+            dirty_kb: 12_800,
+            writeback_kb: 2_048,
+        };
+        let label = info.dirty_label();
+        assert!(label.starts_with("Dirty+WB:"));
+        assert!(label.contains("14.5MiB"));
+    }
+
+    #[test]
+    fn test_meminfo_dirty_label_zero() {
+        let info = MemInfo {
+            ram_total_kb: 16_384_000,
+            ram_used_kb: 8_000_000,
+            swap_total_kb: 0,
+            swap_used_kb: 0,
+            dirty_kb: 0,
+            writeback_kb: 0,
+        };
+        assert_eq!(info.dirty_label(), "Dirty+WB: 0.0MiB");
+    }
+
+    #[test]
+    fn test_meminfo_ram_label_format() {
+        let info = MemInfo {
+            ram_total_kb: 32_768_000 ,
+            ram_used_kb: 16_384_000,
+            swap_total_kb: 0,
+            swap_used_kb: 0,
+            dirty_kb: 0,
+            writeback_kb: 0,
+        };
+        let label = info.ram_label();
+        assert!(label.starts_with("RAM:"));
+        assert!(label.contains("50%"));
+        assert!(label.contains("15.6GiB"));
+        assert!(label.contains("31.2GiB"));
+    }
+
+    #[test]
+    fn test_meminfo_swap_label_format() {
+        let info = MemInfo {
+            ram_total_kb: 32_768_000,
+            ram_used_kb: 16_384_000,
+            swap_total_kb: 8_388_608,
+            swap_used_kb: 4_194_304,
+            dirty_kb: 0,
+            writeback_kb: 0,
+        };
+        let label = info.swap_label();
+        assert!(label.starts_with("SWP:"));
+        assert!(label.contains("50%"));
+        assert!(label.contains("4.0GiB"));
+        assert!(label.contains("8.0GiB"));
+    }
+
+    #[test]
+    fn test_meminfo_ram_label_small_values_show_mib() {
+        let info = MemInfo {
+            ram_total_kb: 512_000,
+            ram_used_kb: 256_000,
+            swap_total_kb: 0,
+            swap_used_kb: 0,
+            dirty_kb: 0,
+            writeback_kb: 0,
+        };
+        let label = info.ram_label();
+        assert!(label.contains("MiB"), "small values should render as MiB: {}", label);
+    }
+
+    #[test]
+    fn test_psi_some_label() {
+        let snap = PsiSnapshot { some_avg10: 3.14, full_avg10: 0.0, ..Default::default() };
+        assert_eq!(snap.some_label(), "some: 3.1%");
+    }
+
+    #[test]
+    fn test_psi_full_label() {
+        let snap = PsiSnapshot { some_avg10: 0.0, full_avg10: 15.75, ..Default::default() };
+        assert_eq!(snap.full_label(), "full: 15.8%");
+    }
+
+    #[test]
+    fn test_psi_summary_label_healthy_boundary() {
+        let just_below = PsiSnapshot { some_avg10: 0.99, full_avg10: 0.99, ..Default::default() };
+        assert!(just_below.summary_label().contains("healthy"));
+
+        let at_boundary = PsiSnapshot { some_avg10: 1.0, full_avg10: 0.0, ..Default::default() };
+        assert!(at_boundary.summary_label().contains("mild"));
+    }
+
+    #[test]
+    fn test_psi_summary_label_full_critical_boundary() {
+        let just_below = PsiSnapshot { some_avg10: 50.0, full_avg10: 9.99, ..Default::default() };
+        assert!(!just_below.summary_label().contains("CRITICAL"));
+
+        let at_boundary = PsiSnapshot { some_avg10: 50.0, full_avg10: 10.0, ..Default::default() };
+        assert!(at_boundary.summary_label().contains("CRITICAL"));
+    }
+
+    #[test]
+    fn test_psi_summary_label_stressed_boundary() {
+        let just_below = PsiSnapshot { some_avg10: 9.99, full_avg10: 0.0, ..Default::default() };
+        assert!(just_below.summary_label().contains("mild"));
+
+        let at_boundary = PsiSnapshot { some_avg10: 10.0, full_avg10: 0.0, ..Default::default() };
+        assert!(at_boundary.summary_label().contains("stressed"));
+    }
+
+    #[test]
+    fn test_psi_severity_pct_uses_higher_value() {
+        let some_higher = PsiSnapshot { some_avg10: 8.0, full_avg10: 2.0, ..Default::default() };
+        assert!((some_higher.severity_pct() - 8.0).abs() < 0.001);
+
+        let full_higher = PsiSnapshot { some_avg10: 3.0, full_avg10: 12.0, ..Default::default() };
+        assert!((full_higher.severity_pct() - 12.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_psi_severity_pct_clamps_to_100() {
+        let over_100 = PsiSnapshot { some_avg10: 150.0, full_avg10: 0.0, ..Default::default() };
+        assert!((over_100.severity_pct() - 100.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_psi_severity_pct_clamps_to_zero() {
+        let negative = PsiSnapshot { some_avg10: -5.0, full_avg10: -10.0, ..Default::default() };
+        assert!((negative.severity_pct() - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_human_bytes_mib_small_value() {
+        assert_eq!(human_bytes_mib(512), "0.5MiB");
+    }
+
+    #[test]
+    fn test_human_bytes_mib_exact_mib() {
+        assert_eq!(human_bytes_mib(1024), "1.0MiB");
+    }
+
+    #[test]
+    fn test_human_bytes_mib_large_value_shows_gib() {
+        assert_eq!(human_bytes_mib(2_097_152), "2.0GiB");
+    }
+
+    #[test]
+    fn test_human_bytes_mib_zero() {
+        assert_eq!(human_bytes_mib(0), "0.0MiB");
+    }
+
+    #[test]
+    fn test_human_bytes_mib_just_below_gib_threshold() {
+        let just_under_gib_kb = 1024 * 1024 - 1;
+        let result = human_bytes_mib(just_under_gib_kb);
+        assert!(result.contains("MiB"), "just under 1 GiB should show MiB: {}", result);
+    }
+
+    #[test]
+    fn test_human_bytes_mib_at_gib_threshold() {
+        let exactly_one_gib_kb = 1024 * 1024;
+        let result = human_bytes_mib(exactly_one_gib_kb);
+        assert!(result.contains("GiB"), "exactly 1 GiB should show GiB: {}", result);
     }
 }

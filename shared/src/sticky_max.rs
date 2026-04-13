@@ -54,7 +54,49 @@ mod tests {
     fn test_does_not_decay_immediately() {
         let mut sm = StickyMax::new();
         sm.update(100.0);
-        assert_eq!(sm.update(1.0), 100.0); // still 100
-        assert_eq!(sm.update(5.0), 100.0); // still 100
+        assert_eq!(sm.update(1.0), 100.0);
+        assert_eq!(sm.update(5.0), 100.0);
+    }
+
+    #[test]
+    fn test_reset_clears_state() {
+        let mut sticky_max = StickyMax::new();
+        sticky_max.update(75.0);
+        assert_eq!(sticky_max.current(), 75.0);
+
+        sticky_max.reset();
+        assert_eq!(sticky_max.current(), 0.0);
+    }
+
+    #[test]
+    fn test_current_returns_displayed_value() {
+        let mut sticky_max = StickyMax::new();
+        assert_eq!(sticky_max.current(), 0.0);
+
+        sticky_max.update(42.0);
+        assert_eq!(sticky_max.current(), 42.0);
+
+        sticky_max.update(10.0);
+        assert_eq!(sticky_max.current(), 42.0);
+    }
+
+    #[test]
+    fn test_update_with_zero() {
+        let mut sticky_max = StickyMax::new();
+        let result = sticky_max.update(0.0);
+        assert_eq!(result, 0.0);
+        assert_eq!(sticky_max.current(), 0.0);
+    }
+
+    #[test]
+    fn test_multiple_peaks_takes_highest() {
+        let mut sticky_max = StickyMax::new();
+        sticky_max.update(20.0);
+        sticky_max.update(80.0);
+        sticky_max.update(50.0);
+        sticky_max.update(90.0);
+        sticky_max.update(60.0);
+
+        assert_eq!(sticky_max.current(), 90.0);
     }
 }

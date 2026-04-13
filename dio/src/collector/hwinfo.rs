@@ -108,3 +108,38 @@ fn detect_transport(device_name: &str) -> String {
 fn read_trimmed(path: &str) -> Option<String> {
     fs::read_to_string(path).ok().map(|s| s.trim().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_hwinfo(model: &str, capacity_gb: f64, transport: &str, temp: Option<f64>) -> DiskHwInfo {
+        DiskHwInfo {
+            model: model.to_string(),
+            capacity_gb,
+            transport: transport.to_string(),
+            temp_celsius: temp,
+        }
+    }
+
+    #[test]
+    fn test_summary_with_all_fields() {
+        let info = make_hwinfo("Samsung 990 Pro", 1000.0, "NVMe PCIe", Some(42.0));
+        let result = info.summary();
+        assert_eq!(result, "Samsung 990 Pro | 1000GB | NVMe PCIe | 42°C");
+    }
+
+    #[test]
+    fn test_summary_without_temperature() {
+        let info = make_hwinfo("WD Blue", 500.0, "SATA SSD", None);
+        let result = info.summary();
+        assert_eq!(result, "WD Blue | 500GB | SATA SSD");
+    }
+
+    #[test]
+    fn test_summary_with_empty_model() {
+        let info = make_hwinfo("", 256.0, "NVMe", Some(55.0));
+        let result = info.summary();
+        assert_eq!(result, " | 256GB | NVMe | 55°C");
+    }
+}
