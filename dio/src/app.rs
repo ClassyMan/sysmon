@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use crate::collector::diskstats;
+use std::collections::HashMap;
+
+use crate::collector::{diskstats, hwinfo};
+use crate::collector::hwinfo::DiskHwInfo;
 use crate::input::AppAction;
 use crate::model::device::DeviceSeries;
 use crate::model::process::{ProcessIoTable, ProcessIoTracker};
@@ -28,6 +31,7 @@ pub struct App {
     pub ring_capacity: usize,
     pub process_table: ProcessIoTable,
     pub fast_mode: bool,
+    pub disk_hw: HashMap<String, DiskHwInfo>,
     process_tracker: ProcessIoTracker,
     normal_refresh_ms: u64,
     normal_scrollback_secs: u64,
@@ -48,6 +52,7 @@ impl App {
             ring_capacity,
             process_table: ProcessIoTable::new(),
             fast_mode: false,
+            disk_hw: HashMap::new(),
             process_tracker: ProcessIoTracker::new(),
             normal_refresh_ms: refresh_ms,
             normal_scrollback_secs: scrollback_secs,
@@ -61,7 +66,21 @@ impl App {
             self.selected_device = self.devices.len() - 1;
         }
 
-        // Only collect process I/O when in process view (avoid unnecessary overhead)
+        for device in &self.devices {
+            self.disk_hw
+                .entry(device.name.clone())
+                .and_modify(|info| hwinfo::refresh_temp(info, &device.name))
+                .or_insert_with(|| {
+                    hwinfo::read_disk_hwinfo(&device.name)
+                        .unwrap_or(DiskHwInfo {
+                            model: String::new(),
+                            capacity_gb: 0.0,
+                            transport: String::new(),
+                            temp_celsius: None,
+                        })
+                });
+        }
+
         if self.view_mode == ViewMode::ProcessTable {
             let (entries, degraded) = self.process_tracker.collect();
             self.process_table.update(entries, degraded);

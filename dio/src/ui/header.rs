@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::Line;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Tabs;
 
 use crate::app::{App, ViewMode};
@@ -18,13 +18,35 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .collect();
 
     let view_label = match app.view_mode {
-        ViewMode::AllDevices => " [all]",
-        ViewMode::SingleDevice => " [single]",
-        ViewMode::ProcessTable => " [procs]",
+        ViewMode::AllDevices => "[all]",
+        ViewMode::SingleDevice => "[single]",
+        ViewMode::ProcessTable => "[procs]",
     };
 
-    let fast_tag = if app.fast_mode { " FAST" } else { "" };
-    let title = format!(" dio{} | {}ms{} ", view_label, app.refresh_rate.as_millis(), fast_tag);
+    let hw_summary = app.devices.get(app.selected_device)
+        .and_then(|dev| app.disk_hw.get(&dev.name))
+        .filter(|info| !info.model.is_empty())
+        .map(|info| info.summary())
+        .unwrap_or_default();
+
+    let fast_span = if app.fast_mode {
+        Span::styled(" FAST ", Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD))
+    } else {
+        Span::raw("")
+    };
+
+    let title = Line::from(vec![
+        Span::styled(" DIO ", Style::default().fg(theme::READ_COLOR).add_modifier(Modifier::BOLD)),
+        fast_span,
+        Span::styled(
+            format!(" {} | {} | {}ms ",
+                hw_summary,
+                view_label,
+                app.refresh_rate.as_millis(),
+            ),
+            Style::default().fg(theme::LABEL_COLOR),
+        ),
+    ]);
 
     let tabs = Tabs::new(device_names)
         .select(app.selected_device)
