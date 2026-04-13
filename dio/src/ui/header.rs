@@ -36,7 +36,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     let title = Line::from(vec![
-        Span::styled(" DIO ", Style::default().fg(theme::READ_COLOR).add_modifier(Modifier::BOLD)),
+        Span::styled(" DISK ", Style::default().fg(theme::READ_COLOR).add_modifier(Modifier::BOLD)),
         fast_span,
         Span::styled(
             format!(" {} | {} | {}ms ",
