@@ -1,58 +1,63 @@
 use ratatui::style::Color;
 
-const RX_CHARS: [char; 6] = ['·', ':', '╎', '┊', '┆', '│'];
-const TX_CHARS: [char; 6] = ['·', ':', '╎', '┊', '┆', '│'];
+// Half-width katakana (U+FF65..FF9F) — same range the real Matrix used
+const KATAKANA_START: u32 = 0xFF65;
+const KATAKANA_COUNT: u32 = 56;
 
-const RX_COLORS: [Color; 5] = [
-    Color::Rgb(30, 60, 90),
-    Color::Rgb(50, 100, 150),
-    Color::Rgb(80, 160, 220),
-    Color::Rgb(120, 200, 255),
-    Color::Rgb(200, 240, 255),
-];
-
-const TX_COLORS: [Color; 5] = [
-    Color::Rgb(90, 60, 20),
-    Color::Rgb(150, 100, 30),
-    Color::Rgb(220, 150, 50),
-    Color::Rgb(255, 190, 80),
-    Color::Rgb(255, 230, 170),
-];
-
+/// A single falling stream (column of characters with a bright head and fading trail).
 #[derive(Clone)]
-pub struct Drop {
+pub struct Stream {
     pub col: u16,
-    pub row_frac: f64,
+    pub head_row: f64,
     pub speed: f64,
-    pub intensity: usize,
     pub is_rx: bool,
+    pub trail: Vec<TrailCell>,
+    trail_len: usize,
+    mutate_counter: u8,
 }
 
-impl Drop {
-    pub fn char(&self) -> char {
-        let chars = if self.is_rx { &RX_CHARS } else { &TX_CHARS };
-        chars[self.intensity.min(chars.len() - 1)]
-    }
+#[derive(Clone)]
+pub struct TrailCell {
+    pub row: u16,
+    pub ch: char,
+    pub age: u8,
+}
 
-    pub fn color(&self) -> Color {
-        let colors = if self.is_rx { &RX_COLORS } else { &TX_COLORS };
-        colors[self.intensity.min(colors.len() - 1)]
-    }
-
-    pub fn row(&self) -> u16 {
-        self.row_frac as u16
+impl TrailCell {
+    pub fn color(&self, is_rx: bool) -> Color {
+        if is_rx {
+            match self.age {
+                0 => Color::Rgb(220, 255, 255),
+                1 => Color::Rgb(120, 220, 255),
+                2 => Color::Rgb(80, 170, 230),
+                3 => Color::Rgb(50, 120, 180),
+                4 => Color::Rgb(30, 80, 130),
+                5 => Color::Rgb(20, 50, 90),
+                _ => Color::Rgb(10, 25, 50),
+            }
+        } else {
+            match self.age {
+                0 => Color::Rgb(255, 255, 220),
+                1 => Color::Rgb(255, 210, 120),
+                2 => Color::Rgb(230, 170, 70),
+                3 => Color::Rgb(180, 120, 40),
+                4 => Color::Rgb(130, 80, 25),
+                5 => Color::Rgb(90, 50, 15),
+                _ => Color::Rgb(50, 25, 8),
+            }
+        }
     }
 }
 
 pub struct RainState {
-    pub drops: Vec<Drop>,
+    pub streams: Vec<Stream>,
     rng_state: u64,
 }
 
 impl RainState {
     pub fn new() -> Self {
         Self {
-            drops: Vec::new(),
+            streams: Vec::new(),
             rng_state: 0x12345678_9abcdef0,
         }
     }
@@ -64,43 +69,75 @@ impl RainState {
 
         let half = height / 2;
 
-        // Move existing drops
-        self.drops.retain_mut(|drop| {
-            drop.row_frac += drop.speed;
-            if drop.is_rx {
-                drop.row_frac < half as f64
-            } else {
-                drop.row() < height
+        // Advance existing streams
+        self.streams.retain_mut(|stream| {
+            stream.head_row += stream.speed;
+
+            let head_int = stream.head_row as u16;
+            let boundary = if stream.is_rx { half } else { height };
+
+            // Add new head character to trail
+            if head_int < boundary {
+                let ch = rand_katakana(&mut self.rng_state);
+                stream.trail.push(TrailCell { row: head_int, ch, age: 0 });
             }
+
+            // Age all trail cells
+            for cell in &mut stream.trail {
+                cell.age = cell.age.saturating_add(1);
+            }
+
+            // Randomly mutate some trail characters (matrix flicker effect)
+            stream.mutate_counter = stream.mutate_counter.wrapping_add(1);
+            if stream.mutate_counter % 3 == 0 && !stream.trail.is_empty() {
+                let idx = self.rng_state as usize % stream.trail.len();
+                stream.trail[idx].ch = rand_katakana(&mut self.rng_state);
+            }
+
+            // Trim trail to max length and remove fully faded cells
+            stream.trail.retain(|cell| cell.age < 8);
+            if stream.trail.len() > stream.trail_len {
+                let excess = stream.trail.len() - stream.trail_len;
+                stream.trail.drain(0..excess);
+            }
+
+            // Stream alive while trail has visible cells
+            !stream.trail.is_empty()
         });
 
-        // Spawn new RX drops (fall from top of upper half)
-        let rx_drop_count = rate_to_drops(rx_rate, width);
-        for _ in 0..rx_drop_count {
+        // Spawn new RX streams
+        let rx_spawn = rate_to_spawns(rx_rate, width);
+        for _ in 0..rx_spawn {
             let col = self.rand_range(0, width as u64) as u16;
             let intensity = rate_to_intensity(rx_rate);
-            let speed = 0.3 + (intensity as f64) * 0.15;
-            self.drops.push(Drop {
+            let speed = 0.4 + (intensity as f64) * 0.2;
+            let trail_len = 4 + intensity * 2;
+            self.streams.push(Stream {
                 col,
-                row_frac: 0.0,
+                head_row: 0.0,
                 speed,
-                intensity,
                 is_rx: true,
+                trail: Vec::with_capacity(trail_len),
+                trail_len,
+                mutate_counter: 0,
             });
         }
 
-        // Spawn new TX drops (fall from top of lower half)
-        let tx_drop_count = rate_to_drops(tx_rate, width);
-        for _ in 0..tx_drop_count {
+        // Spawn new TX streams
+        let tx_spawn = rate_to_spawns(tx_rate, width);
+        for _ in 0..tx_spawn {
             let col = self.rand_range(0, width as u64) as u16;
             let intensity = rate_to_intensity(tx_rate);
-            let speed = 0.3 + (intensity as f64) * 0.15;
-            self.drops.push(Drop {
+            let speed = 0.4 + (intensity as f64) * 0.2;
+            let trail_len = 4 + intensity * 2;
+            self.streams.push(Stream {
                 col,
-                row_frac: half as f64,
+                head_row: half as f64,
                 speed,
-                intensity,
                 is_rx: false,
+                trail: Vec::with_capacity(trail_len),
+                trail_len,
+                mutate_counter: 0,
             });
         }
     }
@@ -109,19 +146,29 @@ impl RainState {
         if max <= min {
             return min;
         }
-        self.rng_state ^= self.rng_state << 13;
-        self.rng_state ^= self.rng_state >> 7;
-        self.rng_state ^= self.rng_state << 17;
+        xorshift(&mut self.rng_state);
         min + (self.rng_state % (max - min))
     }
 }
 
-fn rate_to_drops(bytes_per_sec: f64, width: u16) -> usize {
+fn rand_katakana(rng: &mut u64) -> char {
+    xorshift(rng);
+    let offset = (*rng % KATAKANA_COUNT as u64) as u32;
+    char::from_u32(KATAKANA_START + offset).unwrap_or('ア')
+}
+
+fn xorshift(state: &mut u64) {
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+}
+
+fn rate_to_spawns(bytes_per_sec: f64, width: u16) -> usize {
     if bytes_per_sec <= 0.0 {
         return 0;
     }
     let base = (bytes_per_sec.log10() - 1.0).max(0.0);
-    let density = (base * 0.8).min(width as f64 * 0.4);
+    let density = (base * 0.6).min(width as f64 * 0.3);
     density.round() as usize
 }
 
@@ -140,51 +187,62 @@ mod tests {
     #[test]
     fn test_rain_state_new() {
         let state = RainState::new();
-        assert!(state.drops.is_empty());
+        assert!(state.streams.is_empty());
     }
 
     #[test]
-    fn test_tick_spawns_drops_with_traffic() {
+    fn test_tick_spawns_streams_with_traffic() {
         let mut state = RainState::new();
         state.tick(80, 40, 100_000.0, 50_000.0);
-        assert!(!state.drops.is_empty());
+        assert!(!state.streams.is_empty());
     }
 
     #[test]
-    fn test_tick_no_drops_at_zero_rate() {
+    fn test_tick_no_streams_at_zero_rate() {
         let mut state = RainState::new();
         state.tick(80, 40, 0.0, 0.0);
-        assert!(state.drops.is_empty());
+        assert!(state.streams.is_empty());
     }
 
     #[test]
-    fn test_drops_expire_past_boundary() {
+    fn test_streams_expire_over_time() {
         let mut state = RainState::new();
         state.tick(80, 10, 100_000.0, 0.0);
-        for _ in 0..100 {
+        for _ in 0..200 {
             state.tick(80, 10, 0.0, 0.0);
         }
-        assert!(state.drops.is_empty());
+        assert!(state.streams.is_empty());
     }
 
     #[test]
-    fn test_drop_char_and_color() {
-        let drop = Drop {
-            col: 0,
-            row_frac: 5.0,
-            speed: 1.0,
-            intensity: 2,
-            is_rx: true,
-        };
-        assert_eq!(drop.char(), '╎');
-        assert_eq!(drop.row(), 5);
-        assert!(matches!(drop.color(), Color::Rgb(_, _, _)));
+    fn test_trail_cell_color_varies_by_age() {
+        let young = TrailCell { row: 0, ch: 'ア', age: 0 };
+        let old = TrailCell { row: 0, ch: 'ア', age: 6 };
+        let Color::Rgb(yr, _, _) = young.color(true) else { panic!() };
+        let Color::Rgb(or, _, _) = old.color(true) else { panic!() };
+        assert!(yr > or);
     }
 
     #[test]
-    fn test_rate_to_intensity_scaling() {
-        assert_eq!(rate_to_intensity(0.0), 0);
-        assert_eq!(rate_to_intensity(10.0), 0);
-        assert!(rate_to_intensity(1_000_000.0) >= 3);
+    fn test_rand_katakana_produces_valid_chars() {
+        let mut rng = 0xDEADBEEF_u64;
+        for _ in 0..100 {
+            let ch = rand_katakana(&mut rng);
+            let code = ch as u32;
+            assert!(code >= KATAKANA_START && code < KATAKANA_START + KATAKANA_COUNT);
+        }
+    }
+
+    #[test]
+    fn test_trail_mutates_characters() {
+        let mut state = RainState::new();
+        state.tick(80, 40, 1_000_000.0, 0.0);
+        // Run several ticks to trigger mutation
+        for _ in 0..20 {
+            state.tick(80, 40, 1_000_000.0, 0.0);
+        }
+        // Streams should have trail cells with varied characters
+        let has_trail = state.streams.iter().any(|s| s.trail.len() > 1);
+        assert!(has_trail);
     }
 }

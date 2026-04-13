@@ -165,24 +165,22 @@ fn draw_rain(frame: &mut Frame, area: Rect, app: &App) {
         Style::default().fg(TX_COLOR).add_modifier(Modifier::BOLD),
     );
 
-    // Render drops
-    for drop in &app.rain.drops {
-        let abs_row = if drop.is_rx {
-            inner.y + drop.row()
-        } else {
-            inner.y + drop.row()
-        };
+    // Render matrix streams
+    for stream in &app.rain.streams {
+        for trail_cell in &stream.trail {
+            let abs_row = inner.y + trail_cell.row;
 
-        if abs_row < inner.y || abs_row >= inner.bottom() || abs_row == divider_row {
-            continue;
-        }
-        if drop.col < inner.x || drop.col >= inner.right() {
-            continue;
-        }
+            if abs_row < inner.y || abs_row >= inner.bottom() || abs_row == divider_row {
+                continue;
+            }
+            if stream.col < inner.x || stream.col >= inner.right() {
+                continue;
+            }
 
-        if let Some(cell) = buf.cell_mut((drop.col, abs_row)) {
-            cell.set_char(drop.char());
-            cell.set_style(Style::default().fg(drop.color()));
+            if let Some(cell) = buf.cell_mut((stream.col, abs_row)) {
+                cell.set_char(trail_cell.ch);
+                cell.set_style(Style::default().fg(trail_cell.color(stream.is_rx)));
+            }
         }
     }
 }
