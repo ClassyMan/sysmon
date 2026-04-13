@@ -6,28 +6,26 @@ use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 
 use crate::app::App;
 use crate::collector::human_rate;
+use sysmon_shared::line_chart::{self, LineChart};
 
-const RX_COLOR: Color = Color::Rgb(100, 200, 255);   // cool blue
-const TX_COLOR: Color = Color::Rgb(255, 180, 80);    // warm amber
+const RX_COLOR: Color = Color::Rgb(100, 200, 255);
+const TX_COLOR: Color = Color::Rgb(255, 180, 80);
 const BORDER_COLOR: Color = Color::DarkGray;
 const LABEL_COLOR: Color = Color::Gray;
-const ZERO_LINE_COLOR: Color = Color::Rgb(60, 60, 60);
-
-const WAVE_BLOCKS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 pub fn render(frame: &mut Frame, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),     // header
-            Constraint::Min(6),        // waveform
-            Constraint::Length(3),     // RX gauge
-            Constraint::Length(3),     // TX gauge
+            Constraint::Length(1),
+            Constraint::Min(6),
+            Constraint::Length(3),
+            Constraint::Length(3),
         ])
         .split(frame.area());
 
     draw_header(frame, outer[0], app);
-    draw_waveform(frame, outer[1], app);
+    draw_charts(frame, outer[1], app);
     draw_rx_gauge(frame, outer[2], app);
     draw_tx_gauge(frame, outer[3], app);
 }
@@ -61,163 +59,64 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(text, area);
 }
 
-fn draw_waveform(frame: &mut Frame, area: Rect, app: &App) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(BORDER_COLOR));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
+    let [rx_area, tx_area] =
+        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .areas(area);
 
-    if inner.height < 2 || inner.width < 4 {
-        return;
-    }
-
-    let half_height = inner.height / 2;
-    let center_row = inner.y + half_height;
-    let width = inner.width as usize;
-
-    // Draw center line
-    for col in inner.x..inner.right() {
-        let cell = frame.buffer_mut().cell_mut((col, center_row));
-        if let Some(cell) = cell {
-            cell.set_char('─');
-            cell.set_style(Style::default().fg(ZERO_LINE_COLOR));
-        }
-    }
-
-    // Get data
     let mut rx_data = Vec::new();
     let mut tx_data = Vec::new();
     app.rx_history.as_chart_data(&mut rx_data);
     app.tx_history.as_chart_data(&mut tx_data);
 
-    let rx_max = app.rx_y.current().max(1.0);
-    let tx_max = app.tx_y.current().max(1.0);
+    let capacity = app.chart_capacity() as f64;
 
-    // RX waveform: grows UPWARD from center
-    draw_half_wave(
-        frame,
-        inner.x,
-        center_row,
-        width,
-        half_height,
-        &rx_data,
-        rx_max,
-        RX_COLOR,
-        true,
+    let rx_max = auto_scale(app.rx_y.current());
+    let tx_max = auto_scale(app.tx_y.current());
+
+    let rx_label = app.latest_rates.as_ref().map_or_else(
+        || "RX: --".to_string(),
+        |r| format!("RX: {}", human_rate(r.rx_bytes_per_sec)),
+    );
+    let tx_label = app.latest_rates.as_ref().map_or_else(
+        || "TX: --".to_string(),
+        |r| format!("TX: {}", human_rate(r.tx_bytes_per_sec)),
     );
 
-    // TX waveform: grows DOWNWARD from center
-    let bottom_half = inner.height - half_height - 1;
-    draw_half_wave(
-        frame,
-        inner.x,
-        center_row,
-        width,
-        bottom_half,
-        &tx_data,
-        tx_max,
-        TX_COLOR,
-        false,
-    );
+    let rx_chart = LineChart::new(vec![line_chart::Dataset {
+        data: &rx_data,
+        color: RX_COLOR,
+        name: rx_label,
+    }])
+    .block(
+        Block::default()
+            .title(" RX ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(BORDER_COLOR)),
+    )
+    .x_bounds([0.0, capacity - 1.0])
+    .y_bounds([0.0, rx_max])
+    .x_labels([format!("{}s", app.scrollback_secs), "0s".to_string()])
+    .y_labels(["0".to_string(), human_rate(rx_max)]);
 
-    // Labels on center line
-    let rx_label = format!(" RX {} ", app.latest_rates.as_ref()
-        .map_or("--".to_string(), |r| human_rate(r.rx_bytes_per_sec)));
-    let tx_label = format!(" TX {} ", app.latest_rates.as_ref()
-        .map_or("--".to_string(), |r| human_rate(r.tx_bytes_per_sec)));
+    let tx_chart = LineChart::new(vec![line_chart::Dataset {
+        data: &tx_data,
+        color: TX_COLOR,
+        name: tx_label,
+    }])
+    .block(
+        Block::default()
+            .title(" TX ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(BORDER_COLOR)),
+    )
+    .x_bounds([0.0, capacity - 1.0])
+    .y_bounds([0.0, tx_max])
+    .x_labels([format!("{}s", app.scrollback_secs), "0s".to_string()])
+    .y_labels(["0".to_string(), human_rate(tx_max)]);
 
-    let buf = frame.buffer_mut();
-    buf.set_string(
-        inner.x + 1,
-        center_row,
-        &rx_label,
-        Style::default().fg(RX_COLOR).add_modifier(Modifier::BOLD),
-    );
-    let tx_label_x = inner.right().saturating_sub(tx_label.len() as u16 + 1);
-    buf.set_string(
-        tx_label_x,
-        center_row,
-        &tx_label,
-        Style::default().fg(TX_COLOR).add_modifier(Modifier::BOLD),
-    );
-}
-
-fn draw_half_wave(
-    frame: &mut Frame,
-    start_x: u16,
-    center_row: u16,
-    width: usize,
-    max_rows: u16,
-    data: &[(f64, f64)],
-    y_max: f64,
-    color: Color,
-    upward: bool,
-) {
-    if data.is_empty() || max_rows == 0 {
-        return;
-    }
-
-    let data_len = data.len();
-    let sub_pixels = max_rows as f64 * 8.0;
-
-    let data_slice = if data_len <= width {
-        data
-    } else {
-        &data[data_len - width..]
-    };
-
-    let col_offset = if data_slice.len() < width {
-        width - data_slice.len()
-    } else {
-        0
-    };
-
-    let buf = frame.buffer_mut();
-
-    for (idx, &(_, value)) in data_slice.iter().enumerate() {
-        let col = start_x + (col_offset + idx) as u16;
-        let normalized = (value / y_max).clamp(0.0, 1.0);
-        let pixel_height = (normalized * sub_pixels).round() as u16;
-
-        if pixel_height == 0 {
-            continue;
-        }
-
-        let full_rows = pixel_height / 8;
-        let remainder = (pixel_height % 8) as usize;
-
-        for row_offset in 0..full_rows {
-            let row = if upward {
-                center_row.saturating_sub(1 + row_offset)
-            } else {
-                center_row + 1 + row_offset
-            };
-            if let Some(cell) = buf.cell_mut((col, row)) {
-                cell.set_char('█');
-                cell.set_style(Style::default().fg(color));
-            }
-        }
-
-        if remainder > 0 {
-            let row = if upward {
-                center_row.saturating_sub(1 + full_rows)
-            } else {
-                center_row + 1 + full_rows
-            };
-            let block_char = if upward {
-                WAVE_BLOCKS[remainder]
-            } else {
-                // For downward, use upper blocks: ▔ doesn't exist in standard,
-                // use the complementary lower block
-                WAVE_BLOCKS[remainder]
-            };
-            if let Some(cell) = buf.cell_mut((col, row)) {
-                cell.set_char(block_char);
-                cell.set_style(Style::default().fg(color));
-            }
-        }
-    }
+    frame.render_widget(rx_chart, rx_area);
+    frame.render_widget(tx_chart, tx_area);
 }
 
 fn draw_rx_gauge(frame: &mut Frame, area: Rect, app: &App) {
@@ -248,4 +147,22 @@ fn draw_tx_gauge(frame: &mut Frame, area: Rect, app: &App) {
         .ratio(pct / 100.0);
 
     frame.render_widget(gauge, area);
+}
+
+fn auto_scale(observed_max: f64) -> f64 {
+    if observed_max <= 0.0 {
+        return 1000.0;
+    }
+    let padded = observed_max * 1.2;
+    let steps: &[f64] = &[
+        1_000.0, 2_000.0, 5_000.0, 10_000.0, 20_000.0, 50_000.0,
+        100_000.0, 200_000.0, 500_000.0,
+        1_000_000.0, 2_000_000.0, 5_000_000.0, 10_000_000.0,
+        20_000_000.0, 50_000_000.0, 100_000_000.0,
+        500_000_000.0, 1_000_000_000.0,
+    ];
+    steps.iter()
+        .find(|&&step| step >= padded)
+        .copied()
+        .unwrap_or(padded.ceil())
 }
