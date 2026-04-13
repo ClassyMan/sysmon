@@ -13,6 +13,7 @@ pub enum ViewMode {
 
 const FAST_REFRESH_MS: u64 = 25;
 const FAST_SCROLLBACK_SECS: u64 = 3;
+const RAIN_REFRESH_MS: u64 = 50;
 
 pub struct App {
     pub rx_history: RingBuffer,
@@ -110,8 +111,18 @@ impl App {
 
     pub fn toggle_view(&mut self) {
         self.view_mode = match self.view_mode {
-            ViewMode::Charts => ViewMode::Rain,
-            ViewMode::Rain => ViewMode::Charts,
+            ViewMode::Charts => {
+                if !self.fast_mode {
+                    self.refresh_ms = RAIN_REFRESH_MS;
+                }
+                ViewMode::Rain
+            }
+            ViewMode::Rain => {
+                if !self.fast_mode {
+                    self.refresh_ms = self.normal_refresh_ms;
+                }
+                ViewMode::Charts
+            }
         };
     }
 
