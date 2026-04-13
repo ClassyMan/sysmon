@@ -10,7 +10,7 @@ use crate::input::AppAction;
 use crate::model::device::DeviceSeries;
 use crate::model::process::{ProcessIoTable, ProcessIoTracker};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewMode {
     AllDevices,
     SingleDevice,
@@ -156,10 +156,220 @@ impl App {
     }
 }
 
-fn min_capacity(refresh_ms: u64, scrollback_secs: u64) -> usize {
+fn compute_capacity(refresh_ms: u64, scrollback_secs: u64, term_width: usize) -> usize {
     let time_based = (scrollback_secs * 1000 / refresh_ms) as usize;
+    time_based.max(term_width)
+}
+
+fn min_capacity(refresh_ms: u64, scrollback_secs: u64) -> usize {
     let term_width = crossterm::terminal::size()
         .map(|(w, _)| w as usize)
         .unwrap_or(200);
-    time_based.max(term_width)
+    compute_capacity(refresh_ms, scrollback_secs, term_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    impl App {
+        pub fn with_capacity(capacity: usize) -> Self {
+            Self {
+                devices: Vec::new(),
+                selected_device: 0,
+                view_mode: ViewMode::AllDevices,
+                should_quit: false,
+                show_help: false,
+                refresh_rate: Duration::from_millis(500),
+                show_all: false,
+                ring_capacity: capacity,
+                process_table: ProcessIoTable::new(),
+                fast_mode: false,
+                disk_hw: HashMap::new(),
+                process_tracker: ProcessIoTracker::new(),
+                normal_refresh_ms: 500,
+                normal_scrollback_secs: 60,
+            }
+        }
+    }
+
+    #[test]
+    fn test_with_capacity_initial_state() {
+        let app = App::with_capacity(100);
+
+        assert_eq!(app.view_mode, ViewMode::AllDevices);
+        assert_eq!(app.selected_device, 0);
+        assert!(!app.should_quit);
+        assert!(!app.fast_mode);
+        assert!(!app.show_help);
+    }
+
+    #[test]
+    fn test_handle_action_quit() {
+        let mut app = App::with_capacity(100);
+        app.handle_action(AppAction::Quit);
+
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn test_handle_action_cycle_view_full_cycle() {
+        let mut app = App::with_capacity(100);
+
+        assert_eq!(app.view_mode, ViewMode::AllDevices);
+
+        app.handle_action(AppAction::CycleView);
+        assert_eq!(app.view_mode, ViewMode::SingleDevice);
+
+        app.handle_action(AppAction::CycleView);
+        assert_eq!(app.view_mode, ViewMode::ProcessTable);
+
+        app.handle_action(AppAction::CycleView);
+        assert_eq!(app.view_mode, ViewMode::AllDevices);
+    }
+
+    #[test]
+    fn test_handle_action_toggle_process_view_on() {
+        let mut app = App::with_capacity(100);
+        app.handle_action(AppAction::ToggleProcessView);
+
+        assert_eq!(app.view_mode, ViewMode::ProcessTable);
+    }
+
+    #[test]
+    fn test_handle_action_toggle_process_view_off() {
+        let mut app = App::with_capacity(100);
+        app.view_mode = ViewMode::ProcessTable;
+
+        app.handle_action(AppAction::ToggleProcessView);
+
+        assert_eq!(app.view_mode, ViewMode::AllDevices);
+    }
+
+    #[test]
+    fn test_handle_action_next_device() {
+        let mut app = App::with_capacity(100);
+        app.devices.push(DeviceSeries::new("sda".to_string(), 10));
+        app.devices.push(DeviceSeries::new("sdb".to_string(), 10));
+        app.devices.push(DeviceSeries::new("sdc".to_string(), 10));
+
+        assert_eq!(app.selected_device, 0);
+
+        app.handle_action(AppAction::NextDevice);
+        assert_eq!(app.selected_device, 1);
+
+        app.handle_action(AppAction::NextDevice);
+        assert_eq!(app.selected_device, 2);
+
+        app.handle_action(AppAction::NextDevice);
+        assert_eq!(app.selected_device, 0);
+    }
+
+    #[test]
+    fn test_handle_action_prev_device() {
+        let mut app = App::with_capacity(100);
+        app.devices.push(DeviceSeries::new("sda".to_string(), 10));
+        app.devices.push(DeviceSeries::new("sdb".to_string(), 10));
+        app.devices.push(DeviceSeries::new("sdc".to_string(), 10));
+
+        assert_eq!(app.selected_device, 0);
+
+        app.handle_action(AppAction::PrevDevice);
+        assert_eq!(app.selected_device, 2);
+
+        app.handle_action(AppAction::PrevDevice);
+        assert_eq!(app.selected_device, 1);
+
+        app.handle_action(AppAction::PrevDevice);
+        assert_eq!(app.selected_device, 0);
+    }
+
+    #[test]
+    fn test_handle_action_next_device_empty() {
+        let mut app = App::with_capacity(100);
+
+        app.handle_action(AppAction::NextDevice);
+
+        assert_eq!(app.selected_device, 0);
+    }
+
+    #[test]
+    fn test_handle_action_toggle_help() {
+        let mut app = App::with_capacity(100);
+
+        assert!(!app.show_help);
+
+        app.handle_action(AppAction::ToggleHelp);
+        assert!(app.show_help);
+
+        app.handle_action(AppAction::ToggleHelp);
+        assert!(!app.show_help);
+    }
+
+    #[test]
+    fn test_handle_action_increase_refresh() {
+        let mut app = App::with_capacity(100);
+        app.handle_action(AppAction::IncreaseRefresh);
+
+        assert_eq!(app.refresh_rate, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn test_handle_action_increase_refresh_min() {
+        let mut app = App::with_capacity(100);
+        app.refresh_rate = Duration::from_millis(100);
+
+        app.handle_action(AppAction::IncreaseRefresh);
+
+        assert_eq!(app.refresh_rate, Duration::from_millis(100));
+    }
+
+    #[test]
+    fn test_handle_action_decrease_refresh() {
+        let mut app = App::with_capacity(100);
+        app.handle_action(AppAction::DecreaseRefresh);
+
+        assert_eq!(app.refresh_rate, Duration::from_millis(1000));
+    }
+
+    #[test]
+    fn test_handle_action_decrease_refresh_max() {
+        let mut app = App::with_capacity(100);
+        app.refresh_rate = Duration::from_millis(5000);
+
+        app.handle_action(AppAction::DecreaseRefresh);
+
+        assert_eq!(app.refresh_rate, Duration::from_millis(5000));
+    }
+
+    #[test]
+    fn test_handle_action_toggle_fast_mode() {
+        let mut app = App::with_capacity(100);
+        app.devices.push(DeviceSeries::new("sda".to_string(), 10));
+
+        app.handle_action(AppAction::ToggleFastMode);
+
+        assert!(app.fast_mode);
+        assert_eq!(app.refresh_rate, Duration::from_millis(FAST_REFRESH_MS));
+        assert!(app.devices.is_empty());
+    }
+
+    #[test]
+    fn test_handle_action_none() {
+        let mut app = App::with_capacity(100);
+        let original_view_mode = app.view_mode;
+        let original_selected = app.selected_device;
+        let original_should_quit = app.should_quit;
+        let original_fast_mode = app.fast_mode;
+        let original_show_help = app.show_help;
+
+        app.handle_action(AppAction::None);
+
+        assert_eq!(app.view_mode, original_view_mode);
+        assert_eq!(app.selected_device, original_selected);
+        assert_eq!(app.should_quit, original_should_quit);
+        assert_eq!(app.fast_mode, original_fast_mode);
+        assert_eq!(app.show_help, original_show_help);
+    }
 }

@@ -75,3 +75,46 @@ pub fn render(frame: &mut Frame, area: Rect, table: &ProcessIoTable) {
 
     frame.render_widget(process_table, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::process::{ProcessIoEntry, ProcessIoTable};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn test_render_empty_table_no_panic() {
+        let table = ProcessIoTable::new();
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &table))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_render_with_entries_no_panic() {
+        let mut table = ProcessIoTable::new();
+        let entries = vec![
+            ProcessIoEntry {
+                pid: 1234,
+                comm: "firefox".to_string(),
+                read_bytes_per_sec: 1_048_576.0,
+                write_bytes_per_sec: 524_288.0,
+            },
+            ProcessIoEntry {
+                pid: 5678,
+                comm: "postgres".to_string(),
+                read_bytes_per_sec: 2_097_152.0,
+                write_bytes_per_sec: 4_194_304.0,
+            },
+        ];
+        table.update(entries, false);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &table))
+            .unwrap();
+    }
+}

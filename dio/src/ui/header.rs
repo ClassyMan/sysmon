@@ -66,3 +66,51 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(tabs, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(terminal: &Terminal<TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let mut output = String::new();
+        for row in 0..buf.area.height {
+            for col in 0..buf.area.width {
+                let cell = &buf[(col, row)];
+                output.push_str(cell.symbol());
+            }
+            output.push('\n');
+        }
+        output
+    }
+
+    #[test]
+    fn test_header_shows_disk() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app))
+            .unwrap();
+
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("DISK"), "expected 'DISK' in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_header_shows_fast() {
+        let mut app = App::with_capacity(100);
+        app.fast_mode = true;
+        let backend = TestBackend::new(120, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app))
+            .unwrap();
+
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("FAST"), "expected 'FAST' in header, got:\n{output}");
+    }
+}

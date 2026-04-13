@@ -59,3 +59,19 @@ pub fn render(frame: &mut Frame, area: Rect) {
 
     frame.render_widget(help, popup_area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn test_help_overlay_no_panic() {
+        let backend = TestBackend::new(80, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area()))
+            .unwrap();
+    }
+}

@@ -313,6 +313,22 @@ fn auto_scale_pct(observed_max: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::collector::{MemInfo, PsiSnapshot, VmRates};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(terminal: &Terminal<TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let mut output = String::new();
+        for row in 0..buf.area.height {
+            for col in 0..buf.area.width {
+                let cell = &buf[(col, row)];
+                output.push_str(cell.symbol());
+            }
+            output.push('\n');
+        }
+        output
+    }
 
     #[test]
     fn test_auto_scale_max() {
@@ -329,5 +345,100 @@ mod tests {
         assert_eq!(auto_scale_pct(0.5), 1.0);
         assert_eq!(auto_scale_pct(3.0), 5.0);
         assert_eq!(auto_scale_pct(80.0), 100.0);
+    }
+
+    #[test]
+    fn test_render_empty_app_no_panic() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_render_with_data_no_panic() {
+        let mut app = App::with_capacity(100);
+        for value in [10.0, 20.0, 30.0, 25.0, 15.0] {
+            app.alloc_history.push(value);
+            app.free_history.push(value * 0.5);
+        }
+        app.latest_info = Some(MemInfo {
+            ram_total_kb: 32_000_000,
+            ram_used_kb: 16_000_000,
+            swap_total_kb: 8_000_000,
+            swap_used_kb: 1_000_000,
+            dirty_kb: 512,
+            writeback_kb: 128,
+        });
+        app.latest_rates = Some(VmRates {
+            alloc_mb_per_sec: 150.0,
+            free_mb_per_sec: 80.0,
+            fault_per_sec: 5000.0,
+            major_fault_per_sec: 2.0,
+            swapin_mb_per_sec: 0.0,
+            swapout_mb_per_sec: 0.0,
+        });
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_header_shows_ram() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("RAM"), "expected 'RAM' in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_header_shows_fast_when_active() {
+        let mut app = App::with_capacity(100);
+        app.fast_mode = true;
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("FAST"), "expected 'FAST' in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_gauge_shows_percentage() {
+        let mut app = App::with_capacity(100);
+        app.latest_info = Some(MemInfo {
+            ram_total_kb: 16_000_000,
+            ram_used_kb: 8_000_000,
+            swap_total_kb: 4_000_000,
+            swap_used_kb: 0,
+            dirty_kb: 0,
+            writeback_kb: 0,
+        });
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("50%"), "expected '50%' in gauge, got:\n{output}");
+    }
+
+    #[test]
+    fn test_psi_gauge_shows_healthy() {
+        let mut app = App::with_capacity(100);
+        app.latest_psi = Some(PsiSnapshot {
+            some_avg10: 0.0,
+            full_avg10: 0.0,
+            some_total_us: 0,
+            full_total_us: 0,
+        });
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("healthy"), "expected 'healthy' in PSI gauge, got:\n{output}");
     }
 }

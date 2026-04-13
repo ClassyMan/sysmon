@@ -14,7 +14,7 @@ impl ProcessIoEntry {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortColumn {
     TotalBytes,
     ReadBytes,
@@ -186,5 +186,170 @@ impl ProcessIoTable {
                 cmp
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LOW_PID: i32 = 10;
+    const MID_PID: i32 = 20;
+    const HIGH_PID: i32 = 30;
+
+    const LOW_READ_BPS: f64 = 100.0;
+    const MID_READ_BPS: f64 = 500.0;
+    const HIGH_READ_BPS: f64 = 1000.0;
+
+    const LOW_WRITE_BPS: f64 = 50.0;
+    const MID_WRITE_BPS: f64 = 200.0;
+    const HIGH_WRITE_BPS: f64 = 800.0;
+
+    fn make_entry(pid: i32, comm: &str, read_bps: f64, write_bps: f64) -> ProcessIoEntry {
+        ProcessIoEntry {
+            pid,
+            comm: comm.to_string(),
+            read_bytes_per_sec: read_bps,
+            write_bytes_per_sec: write_bps,
+        }
+    }
+
+    fn make_three_entries() -> Vec<ProcessIoEntry> {
+        vec![
+            make_entry(MID_PID, "mid", MID_READ_BPS, MID_WRITE_BPS),
+            make_entry(HIGH_PID, "high", HIGH_READ_BPS, HIGH_WRITE_BPS),
+            make_entry(LOW_PID, "low", LOW_READ_BPS, LOW_WRITE_BPS),
+        ]
+    }
+
+    #[test]
+    fn test_total_bytes_per_sec() {
+        let entry = make_entry(LOW_PID, "proc", MID_READ_BPS, HIGH_WRITE_BPS);
+        let expected = MID_READ_BPS + HIGH_WRITE_BPS;
+        assert!((entry.total_bytes_per_sec() - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_sort_column_next_full_cycle() {
+        let start = SortColumn::TotalBytes;
+        let after_one = start.next();
+        assert_eq!(after_one, SortColumn::ReadBytes);
+
+        let after_two = after_one.next();
+        assert_eq!(after_two, SortColumn::WriteBytes);
+
+        let after_three = after_two.next();
+        assert_eq!(after_three, SortColumn::Pid);
+
+        let back_to_start = after_three.next();
+        assert_eq!(back_to_start, SortColumn::TotalBytes);
+    }
+
+    #[test]
+    fn test_process_io_table_new_defaults() {
+        let table = ProcessIoTable::new();
+        assert_eq!(table.sort_column, SortColumn::TotalBytes);
+        assert!(table.sort_descending);
+        assert!(table.entries.is_empty());
+        assert!(!table.permission_degraded);
+    }
+
+    #[test]
+    fn test_update_sorts_by_total_descending() {
+        let mut table = ProcessIoTable::new();
+        table.update(make_three_entries(), false);
+
+        let pids: Vec<i32> = table.entries.iter().map(|entry| entry.pid).collect();
+        assert_eq!(pids, vec![HIGH_PID, MID_PID, LOW_PID]);
+    }
+
+    #[test]
+    fn test_update_propagates_permission_degraded() {
+        let mut table = ProcessIoTable::new();
+        assert!(!table.permission_degraded);
+
+        table.update(Vec::new(), true);
+        assert!(table.permission_degraded);
+    }
+
+    #[test]
+    fn test_cycle_sort_changes_column() {
+        let mut table = ProcessIoTable::new();
+        assert_eq!(table.sort_column, SortColumn::TotalBytes);
+
+        table.cycle_sort();
+        assert_eq!(table.sort_column, SortColumn::ReadBytes);
+    }
+
+    #[test]
+    fn test_cycle_sort_resorts_entries() {
+        let mut table = ProcessIoTable::new();
+        table.update(make_three_entries(), false);
+
+        table.cycle_sort();
+        assert_eq!(table.sort_column, SortColumn::ReadBytes);
+
+        let pids: Vec<i32> = table.entries.iter().map(|entry| entry.pid).collect();
+        assert_eq!(pids, vec![HIGH_PID, MID_PID, LOW_PID]);
+    }
+
+    #[test]
+    fn test_toggle_sort_direction_reverses() {
+        let mut table = ProcessIoTable::new();
+        table.update(make_three_entries(), false);
+
+        let pids_before: Vec<i32> = table.entries.iter().map(|entry| entry.pid).collect();
+        assert_eq!(pids_before, vec![HIGH_PID, MID_PID, LOW_PID]);
+
+        table.toggle_sort_direction();
+        assert!(!table.sort_descending);
+
+        let pids_after: Vec<i32> = table.entries.iter().map(|entry| entry.pid).collect();
+        assert_eq!(pids_after, vec![LOW_PID, MID_PID, HIGH_PID]);
+    }
+
+    #[test]
+    fn test_sort_by_read_bytes() {
+        let mut table = ProcessIoTable::new();
+        table.sort_column = SortColumn::ReadBytes;
+        table.update(make_three_entries(), false);
+
+        let pids: Vec<i32> = table.entries.iter().map(|entry| entry.pid).collect();
+        assert_eq!(pids, vec![HIGH_PID, MID_PID, LOW_PID]);
+    }
+
+    #[test]
+    fn test_sort_by_write_bytes() {
+        let mut table = ProcessIoTable::new();
+        table.sort_column = SortColumn::WriteBytes;
+        table.update(make_three_entries(), false);
+
+        let pids: Vec<i32> = table.entries.iter().map(|entry| entry.pid).collect();
+        assert_eq!(pids, vec![HIGH_PID, MID_PID, LOW_PID]);
+    }
+
+    #[test]
+    fn test_sort_by_pid() {
+        let mut table = ProcessIoTable::new();
+        table.sort_column = SortColumn::Pid;
+        table.sort_descending = false;
+        table.update(make_three_entries(), false);
+
+        let pids: Vec<i32> = table.entries.iter().map(|entry| entry.pid).collect();
+        assert_eq!(pids, vec![LOW_PID, MID_PID, HIGH_PID]);
+    }
+
+    #[test]
+    fn test_sort_ascending_smallest_first() {
+        let mut table = ProcessIoTable::new();
+        table.sort_descending = false;
+        table.update(make_three_entries(), false);
+
+        let first_total = table.entries[0].total_bytes_per_sec();
+        let last_total = table.entries[2].total_bytes_per_sec();
+        assert!(first_total < last_total);
+
+        let pids: Vec<i32> = table.entries.iter().map(|entry| entry.pid).collect();
+        assert_eq!(pids, vec![LOW_PID, MID_PID, HIGH_PID]);
     }
 }

@@ -128,3 +128,33 @@ fn render_single_chart(frame: &mut Frame, area: Rect, spec: &ChartSpec, y_max: f
 
     frame.render_widget(chart, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    #[test]
+    fn test_render_all_empty_no_panic() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_all(frame, frame.area(), &app))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_render_all_with_devices_no_panic() {
+        let mut app = App::with_capacity(100);
+        app.devices.push(DeviceSeries::new("nvme0n1".to_string(), 10));
+        app.devices.push(DeviceSeries::new("sda".to_string(), 10));
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_all(frame, frame.area(), &app))
+            .unwrap();
+    }
+}

@@ -248,4 +248,142 @@ mod tests {
         let rates = DeviceRates::from_delta(&prev, &curr);
         assert!(rates.utilization_pct <= 100.0);
     }
+
+    const SERIES_CAPACITY: usize = 10;
+    const SERIES_NAME: &str = "sda";
+    const SNAPSHOT_READS: u64 = 100;
+    const SNAPSHOT_WRITES: u64 = 50;
+    const SNAPSHOT_SECTORS_R: u64 = 2000;
+    const SNAPSHOT_SECTORS_W: u64 = 1000;
+    const SNAPSHOT_TIME_R_MS: u64 = 500;
+    const SNAPSHOT_TIME_W_MS: u64 = 250;
+    const SNAPSHOT_IO_TIME_MS: u64 = 400;
+
+    #[test]
+    fn test_device_series_new_initial_state() {
+        let series = DeviceSeries::new(SERIES_NAME.to_string(), SERIES_CAPACITY);
+
+        assert_eq!(series.name, SERIES_NAME);
+        assert!(series.active);
+        assert_eq!(series.read_iops.capacity(), SERIES_CAPACITY);
+        assert_eq!(series.write_iops.capacity(), SERIES_CAPACITY);
+        assert_eq!(series.read_throughput.capacity(), SERIES_CAPACITY);
+        assert_eq!(series.write_throughput.capacity(), SERIES_CAPACITY);
+        assert_eq!(series.queue_depth.capacity(), SERIES_CAPACITY);
+        assert_eq!(series.read_latency.capacity(), SERIES_CAPACITY);
+        assert_eq!(series.write_latency.capacity(), SERIES_CAPACITY);
+        assert_eq!(series.utilization.capacity(), SERIES_CAPACITY);
+        assert_eq!(series.iops_y.current(), 0.0);
+        assert_eq!(series.latency_y.current(), 0.0);
+    }
+
+    #[test]
+    fn test_push_first_snapshot_no_rates() {
+        let mut series = DeviceSeries::new(SERIES_NAME.to_string(), SERIES_CAPACITY);
+        let now = Instant::now();
+
+        let snapshot = make_snapshot(
+            now,
+            SNAPSHOT_READS,
+            SNAPSHOT_WRITES,
+            SNAPSHOT_SECTORS_R,
+            SNAPSHOT_SECTORS_W,
+            SNAPSHOT_TIME_R_MS,
+            SNAPSHOT_TIME_W_MS,
+            0,
+            SNAPSHOT_IO_TIME_MS,
+        );
+        series.push_snapshot(snapshot);
+
+        assert!(series.active);
+        assert_eq!(series.read_iops.len(), 0);
+        assert_eq!(series.write_iops.len(), 0);
+        assert_eq!(series.read_throughput.len(), 0);
+        assert_eq!(series.write_throughput.len(), 0);
+        assert_eq!(series.queue_depth.len(), 0);
+        assert_eq!(series.read_latency.len(), 0);
+        assert_eq!(series.write_latency.len(), 0);
+        assert_eq!(series.utilization.len(), 0);
+    }
+
+    #[test]
+    fn test_push_two_snapshots_populates_buffers() {
+        let mut series = DeviceSeries::new(SERIES_NAME.to_string(), SERIES_CAPACITY);
+        let now = Instant::now();
+
+        let first = make_snapshot(
+            now,
+            SNAPSHOT_READS,
+            SNAPSHOT_WRITES,
+            SNAPSHOT_SECTORS_R,
+            SNAPSHOT_SECTORS_W,
+            SNAPSHOT_TIME_R_MS,
+            SNAPSHOT_TIME_W_MS,
+            0,
+            SNAPSHOT_IO_TIME_MS,
+        );
+        let second = make_snapshot(
+            now + Duration::from_secs(1),
+            SNAPSHOT_READS + 200,
+            SNAPSHOT_WRITES + 100,
+            SNAPSHOT_SECTORS_R + 4000,
+            SNAPSHOT_SECTORS_W + 2000,
+            SNAPSHOT_TIME_R_MS + 100,
+            SNAPSHOT_TIME_W_MS + 50,
+            2,
+            SNAPSHOT_IO_TIME_MS + 300,
+        );
+        series.push_snapshot(first);
+        series.push_snapshot(second);
+
+        assert_eq!(series.read_iops.len(), 1);
+        assert_eq!(series.write_iops.len(), 1);
+        assert_eq!(series.read_throughput.len(), 1);
+        assert_eq!(series.write_throughput.len(), 1);
+        assert_eq!(series.queue_depth.len(), 1);
+        assert_eq!(series.read_latency.len(), 1);
+        assert_eq!(series.write_latency.len(), 1);
+        assert_eq!(series.utilization.len(), 1);
+
+        assert!(series.iops_y.current() > 0.0);
+    }
+
+    #[test]
+    fn test_push_zero_delta_gives_zero_rates() {
+        let mut series = DeviceSeries::new(SERIES_NAME.to_string(), SERIES_CAPACITY);
+        let now = Instant::now();
+
+        let first = make_snapshot(
+            now,
+            SNAPSHOT_READS,
+            SNAPSHOT_WRITES,
+            SNAPSHOT_SECTORS_R,
+            SNAPSHOT_SECTORS_W,
+            SNAPSHOT_TIME_R_MS,
+            SNAPSHOT_TIME_W_MS,
+            0,
+            SNAPSHOT_IO_TIME_MS,
+        );
+        let identical_second = make_snapshot(
+            now + Duration::from_secs(1),
+            SNAPSHOT_READS,
+            SNAPSHOT_WRITES,
+            SNAPSHOT_SECTORS_R,
+            SNAPSHOT_SECTORS_W,
+            SNAPSHOT_TIME_R_MS,
+            SNAPSHOT_TIME_W_MS,
+            0,
+            SNAPSHOT_IO_TIME_MS,
+        );
+        series.push_snapshot(first);
+        series.push_snapshot(identical_second);
+
+        assert_eq!(series.read_iops.latest(), Some(0.0));
+        assert_eq!(series.write_iops.latest(), Some(0.0));
+        assert_eq!(series.read_throughput.latest(), Some(0.0));
+        assert_eq!(series.write_throughput.latest(), Some(0.0));
+        assert_eq!(series.read_latency.latest(), Some(0.0));
+        assert_eq!(series.write_latency.latest(), Some(0.0));
+        assert_eq!(series.utilization.latest(), Some(0.0));
+    }
 }

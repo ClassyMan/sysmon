@@ -152,10 +152,144 @@ impl App {
     }
 }
 
-fn min_capacity(refresh_ms: u64, scrollback_secs: u64) -> usize {
+fn compute_capacity(refresh_ms: u64, scrollback_secs: u64, term_width: usize) -> usize {
     let time_based = ((scrollback_secs * 1000) / refresh_ms) as usize;
+    time_based.max(term_width)
+}
+
+fn min_capacity(refresh_ms: u64, scrollback_secs: u64) -> usize {
     let term_width = crossterm::terminal::size()
         .map(|(w, _)| w as usize)
         .unwrap_or(200);
-    time_based.max(term_width)
+    compute_capacity(refresh_ms, scrollback_secs, term_width)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    impl App {
+        pub fn with_capacity(capacity: usize) -> Self {
+            Self {
+                alloc_history: RingBuffer::new(capacity),
+                free_history: RingBuffer::new(capacity),
+                swapin_history: RingBuffer::new(capacity),
+                swapout_history: RingBuffer::new(capacity),
+                fault_history: RingBuffer::new(capacity),
+                major_fault_history: RingBuffer::new(capacity),
+                psi_some_history: RingBuffer::new(capacity),
+                psi_full_history: RingBuffer::new(capacity),
+                latest_info: None,
+                latest_rates: None,
+                latest_psi: None,
+                hardware: HardwareInfo { summary: "test".to_string() },
+                should_quit: false,
+                scrollback_secs: 60,
+                fast_mode: false,
+                refresh_ms: 500,
+                throughput_y: StickyMax::new(),
+                swap_io_y: StickyMax::new(),
+                faults_y: StickyMax::new(),
+                psi_y: StickyMax::new(),
+                normal_refresh_ms: 500,
+                normal_scrollback_secs: 60,
+                prev_vmstat: None,
+            }
+        }
+    }
+
+    #[test]
+    fn test_with_capacity_initial_state() {
+        let app = App::with_capacity(100);
+
+        assert!(!app.fast_mode);
+        assert!(!app.should_quit);
+        assert!(app.alloc_history.is_empty());
+        assert!(app.free_history.is_empty());
+        assert!(app.swapin_history.is_empty());
+        assert!(app.swapout_history.is_empty());
+        assert!(app.fault_history.is_empty());
+        assert!(app.major_fault_history.is_empty());
+        assert!(app.psi_some_history.is_empty());
+        assert!(app.psi_full_history.is_empty());
+        assert!(app.latest_info.is_none());
+        assert!(app.latest_rates.is_none());
+        assert!(app.latest_psi.is_none());
+    }
+
+    #[test]
+    fn test_chart_capacity_matches_constructor() {
+        let app = App::with_capacity(100);
+        assert_eq!(app.chart_capacity(), 100);
+    }
+
+    #[test]
+    fn test_toggle_fast_mode_activates() {
+        let mut app = App::with_capacity(100);
+        app.toggle_fast_mode();
+
+        assert!(app.fast_mode);
+        assert_eq!(app.refresh_ms, FAST_REFRESH_MS);
+        assert_eq!(app.scrollback_secs, FAST_SCROLLBACK_SECS);
+    }
+
+    #[test]
+    fn test_toggle_fast_mode_clears_histories() {
+        let mut app = App::with_capacity(100);
+        app.alloc_history.push(42.0);
+        app.free_history.push(42.0);
+
+        app.toggle_fast_mode();
+
+        assert!(app.alloc_history.is_empty());
+        assert!(app.free_history.is_empty());
+        assert_ne!(app.alloc_history.capacity(), 100);
+        assert!(app.prev_vmstat.is_none());
+    }
+
+    #[test]
+    fn test_toggle_fast_mode_resets_sticky_maxes() {
+        let mut app = App::with_capacity(100);
+        app.throughput_y.update(999.0);
+        app.swap_io_y.update(999.0);
+        app.faults_y.update(999.0);
+        app.psi_y.update(999.0);
+
+        app.toggle_fast_mode();
+
+        assert_eq!(app.throughput_y.current(), 0.0);
+        assert_eq!(app.swap_io_y.current(), 0.0);
+        assert_eq!(app.faults_y.current(), 0.0);
+        assert_eq!(app.psi_y.current(), 0.0);
+    }
+
+    #[test]
+    fn test_toggle_fast_mode_twice_restores() {
+        let mut app = App::with_capacity(100);
+        app.toggle_fast_mode();
+        app.toggle_fast_mode();
+
+        assert!(!app.fast_mode);
+        assert_eq!(app.refresh_ms, 500);
+        assert_eq!(app.scrollback_secs, 60);
+    }
+
+    #[test]
+    fn test_refresh_rate_returns_duration() {
+        let app = App::with_capacity(100);
+        assert_eq!(app.refresh_rate(), Duration::from_millis(500));
+    }
+
+    #[test]
+    fn test_compute_capacity_time_based_wins() {
+        let result = compute_capacity(500, 60, 80);
+        assert_eq!(result, 120);
+    }
+
+    #[test]
+    fn test_compute_capacity_term_width_wins() {
+        let result = compute_capacity(25, 3, 200);
+        assert_eq!(result, 200);
+    }
 }

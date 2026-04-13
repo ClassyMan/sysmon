@@ -949,4 +949,58 @@ full avg10=0.50 avg60=0.20 avg300=0.05 total=50
         let result = human_bytes_mib(exactly_one_gib_kb);
         assert!(result.contains("GiB"), "exactly 1 GiB should show GiB: {}", result);
     }
+
+    const SUB_GIB_KB: u64 = 512;
+    const MULTI_GIB_KB: u64 = 10_485_760;
+    const SUB_GIB_RAM_TOTAL_KB: u64 = 512_000;
+
+    #[test]
+    fn test_human_bytes_gib_sub_gib() {
+        let result = human_bytes_gib(SUB_GIB_KB);
+        assert_eq!(result, "0MiB");
+    }
+
+    #[test]
+    fn test_human_bytes_gib_multi_gib() {
+        let result = human_bytes_gib(MULTI_GIB_KB);
+        assert_eq!(result, "10.0GiB");
+    }
+
+    #[test]
+    fn test_meminfo_ram_label_mib_values() {
+        let info = MemInfo {
+            ram_total_kb: SUB_GIB_RAM_TOTAL_KB,
+            ram_used_kb: 256_000,
+            swap_total_kb: 0,
+            swap_used_kb: 0,
+            dirty_kb: 0,
+            writeback_kb: 0,
+        };
+        let label = info.ram_label();
+        assert!(
+            label.contains("MiB"),
+            "sub-GiB ram_total should produce MiB in label: {}",
+            label
+        );
+    }
+
+    #[test]
+    fn test_psi_severity_pct_both_zero() {
+        let snapshot = PsiSnapshot {
+            some_avg10: 0.0,
+            full_avg10: 0.0,
+            ..Default::default()
+        };
+        assert!((snapshot.severity_pct() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_psi_severity_pct_full_higher_than_some() {
+        let snapshot = PsiSnapshot {
+            some_avg10: 5.0,
+            full_avg10: 20.0,
+            ..Default::default()
+        };
+        assert!((snapshot.severity_pct() - 20.0).abs() < f64::EPSILON);
+    }
 }
