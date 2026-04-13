@@ -1,0 +1,3 @@
+[workspace]
+members = ["shared", "ram", "dio"]
+resolver = "3"

@@ -1,0 +1,18 @@
+[package]
+name = "ram"
+version = "0.7.0"
+edition = "2024"
+description = "Real-time RAM and swap monitor with terminal charts"
+license = "MIT"
+
+[dependencies]
+sysmon-shared = { path = "../shared" }
+ratatui = "0.30"
+crossterm = "0.29"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+dirs = "6"
+
+[profile.release]
+lto = true
+strip = true
