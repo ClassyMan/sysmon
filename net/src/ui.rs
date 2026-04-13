@@ -43,7 +43,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         let speed = info.speed_mbps.map_or_else(String::new, |s| {
             if s >= 1000 { format!("{}Gbps", s / 1000) } else { format!("{}Mbps", s) }
         });
-        let parts: Vec<&str> = [info.name.as_str(), speed.as_str(), info.ip.as_str(), info.operstate.as_str()]
+        let parts: Vec<&str> = [info.name.as_str(), speed.as_str(), info.operstate.as_str()]
             .into_iter()
             .filter(|s| !s.is_empty())
             .collect();
