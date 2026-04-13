@@ -28,22 +28,22 @@ impl TrailCell {
         if is_rx {
             match self.age {
                 0 => Color::Rgb(220, 255, 255),
-                1 => Color::Rgb(120, 220, 255),
-                2 => Color::Rgb(80, 170, 230),
-                3 => Color::Rgb(50, 120, 180),
-                4 => Color::Rgb(30, 80, 130),
-                5 => Color::Rgb(20, 50, 90),
-                _ => Color::Rgb(10, 25, 50),
+                1 => Color::Rgb(100, 230, 220),
+                2 => Color::Rgb(60, 190, 180),
+                3 => Color::Rgb(35, 150, 140),
+                4 => Color::Rgb(20, 110, 100),
+                5 => Color::Rgb(10, 70, 65),
+                _ => Color::Rgb(5, 35, 30),
             }
         } else {
             match self.age {
-                0 => Color::Rgb(255, 255, 220),
-                1 => Color::Rgb(255, 210, 120),
-                2 => Color::Rgb(230, 170, 70),
-                3 => Color::Rgb(180, 120, 40),
-                4 => Color::Rgb(130, 80, 25),
-                5 => Color::Rgb(90, 50, 15),
-                _ => Color::Rgb(50, 25, 8),
+                0 => Color::Rgb(240, 220, 255),
+                1 => Color::Rgb(200, 140, 255),
+                2 => Color::Rgb(160, 100, 220),
+                3 => Color::Rgb(120, 70, 180),
+                4 => Color::Rgb(85, 45, 140),
+                5 => Color::Rgb(55, 25, 100),
+                _ => Color::Rgb(30, 12, 55),
             }
         }
     }

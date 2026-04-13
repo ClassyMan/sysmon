@@ -8,8 +8,8 @@ use crate::app::{App, ViewMode};
 use crate::collector::human_rate;
 use sysmon_shared::line_chart::{self, LineChart};
 
-const RX_COLOR: Color = Color::Rgb(100, 200, 255);
-const TX_COLOR: Color = Color::Rgb(255, 180, 80);
+const DOWN_COLOR: Color = Color::Rgb(100, 230, 220);
+const UP_COLOR: Color = Color::Rgb(180, 120, 255);
 const BORDER_COLOR: Color = Color::DarkGray;
 const LABEL_COLOR: Color = Color::Gray;
 
@@ -52,7 +52,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     });
 
     let text = Paragraph::new(Line::from(vec![
-        Span::styled(" NET ", Style::default().fg(RX_COLOR).add_modifier(Modifier::BOLD)),
+        Span::styled(" NET ", Style::default().fg(DOWN_COLOR).add_modifier(Modifier::BOLD)),
         fast_span,
         Span::styled(
             format!(" {} | {}ms | {}s ", hw_info, app.refresh_ms, app.scrollback_secs),
@@ -78,22 +78,22 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
     let tx_max = auto_scale(app.tx_y.current());
 
     let rx_label = app.latest_rates.as_ref().map_or_else(
-        || "RX: --".to_string(),
-        |r| format!("RX: {}", human_rate(r.rx_bytes_per_sec)),
+        || "Down: --".to_string(),
+        |r| format!("Down: {}", human_rate(r.rx_bytes_per_sec)),
     );
     let tx_label = app.latest_rates.as_ref().map_or_else(
-        || "TX: --".to_string(),
-        |r| format!("TX: {}", human_rate(r.tx_bytes_per_sec)),
+        || "Up: --".to_string(),
+        |r| format!("Up: {}", human_rate(r.tx_bytes_per_sec)),
     );
 
     let rx_chart = LineChart::new(vec![line_chart::Dataset {
         data: &rx_data,
-        color: RX_COLOR,
+        color: DOWN_COLOR,
         name: rx_label,
     }])
     .block(
         Block::default()
-            .title(" RX ")
+            .title(" Download ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(BORDER_COLOR)),
     )
@@ -104,12 +104,12 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
 
     let tx_chart = LineChart::new(vec![line_chart::Dataset {
         data: &tx_data,
-        color: TX_COLOR,
+        color: UP_COLOR,
         name: tx_label,
     }])
     .block(
         Block::default()
-            .title(" TX ")
+            .title(" Upload ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(BORDER_COLOR)),
     )
@@ -146,23 +146,23 @@ fn draw_rain(frame: &mut Frame, area: Rect, app: &App) {
     }
 
     // Draw labels on divider
-    let rx_label = format!(" RX {} ", app.latest_rates.as_ref()
+    let rx_label = format!(" Down {} ", app.latest_rates.as_ref()
         .map_or("--".to_string(), |r| human_rate(r.rx_bytes_per_sec)));
-    let tx_label = format!(" TX {} ", app.latest_rates.as_ref()
+    let tx_label = format!(" Up {} ", app.latest_rates.as_ref()
         .map_or("--".to_string(), |r| human_rate(r.tx_bytes_per_sec)));
 
     buf.set_string(
         inner.x + 1,
         divider_row,
         &rx_label,
-        Style::default().fg(RX_COLOR).add_modifier(Modifier::BOLD),
+        Style::default().fg(DOWN_COLOR).add_modifier(Modifier::BOLD),
     );
     let tx_x = inner.right().saturating_sub(tx_label.len() as u16 + 1);
     buf.set_string(
         tx_x,
         divider_row,
         &tx_label,
-        Style::default().fg(TX_COLOR).add_modifier(Modifier::BOLD),
+        Style::default().fg(UP_COLOR).add_modifier(Modifier::BOLD),
     );
 
     // Render matrix streams
@@ -189,11 +189,11 @@ fn draw_rx_gauge(frame: &mut Frame, area: Rect, app: &App) {
     let rx_rate = app.latest_rates.as_ref().map_or(0.0, |r| r.rx_bytes_per_sec);
     let rx_max = app.rx_y.current().max(1.0);
     let pct = (rx_rate / rx_max * 100.0).clamp(0.0, 100.0);
-    let label = format!("RX: {}", human_rate(rx_rate));
+    let label = format!("Down: {}", human_rate(rx_rate));
 
     let gauge = Gauge::default()
         .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BORDER_COLOR)))
-        .gauge_style(Style::default().fg(RX_COLOR).add_modifier(Modifier::BOLD))
+        .gauge_style(Style::default().fg(DOWN_COLOR).add_modifier(Modifier::BOLD))
         .label(Span::styled(label, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
         .ratio(pct / 100.0);
 
@@ -204,11 +204,11 @@ fn draw_tx_gauge(frame: &mut Frame, area: Rect, app: &App) {
     let tx_rate = app.latest_rates.as_ref().map_or(0.0, |r| r.tx_bytes_per_sec);
     let tx_max = app.tx_y.current().max(1.0);
     let pct = (tx_rate / tx_max * 100.0).clamp(0.0, 100.0);
-    let label = format!("TX: {}", human_rate(tx_rate));
+    let label = format!("Up: {}", human_rate(tx_rate));
 
     let gauge = Gauge::default()
         .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BORDER_COLOR)))
-        .gauge_style(Style::default().fg(TX_COLOR).add_modifier(Modifier::BOLD))
+        .gauge_style(Style::default().fg(UP_COLOR).add_modifier(Modifier::BOLD))
         .label(Span::styled(label, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
         .ratio(pct / 100.0);
 
