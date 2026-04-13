@@ -46,11 +46,15 @@ pub fn list_interfaces() -> Vec<InterfaceInfo> {
         return Vec::new();
     };
 
-    entries
+    let mut ifaces: Vec<InterfaceInfo> = entries
         .flatten()
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name == "lo" || name.starts_with("veth") || name.starts_with("br-") {
+            if name == "lo"
+                || name.starts_with("veth")
+                || name.starts_with("br-")
+                || name.starts_with("docker")
+            {
                 return None;
             }
 
@@ -71,7 +75,29 @@ pub fn list_interfaces() -> Vec<InterfaceInfo> {
                 operstate,
             })
         })
-        .collect()
+        .collect();
+
+    // Sort: physical interfaces with IPs first, then virtual/down interfaces
+    ifaces.sort_by(|iface_a, iface_b| {
+        let score = |iface: &InterfaceInfo| -> u8 {
+            let is_physical = iface.name.starts_with("enp")
+                || iface.name.starts_with("eth")
+                || iface.name.starts_with("wlp")
+                || iface.name.starts_with("wlan");
+            let has_ip = !iface.ip.is_empty();
+            let is_up = iface.operstate == "up";
+            match (is_physical, has_ip, is_up) {
+                (true, true, true) => 0,
+                (true, true, false) => 1,
+                (false, true, true) => 2,
+                (false, true, false) => 3,
+                (_, false, _) => 4,
+            }
+        };
+        score(iface_a).cmp(&score(iface_b))
+    });
+
+    ifaces
 }
 
 pub fn read_net_snapshot(interface: &str) -> Result<NetSnapshot> {
