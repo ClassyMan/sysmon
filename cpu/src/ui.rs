@@ -26,7 +26,7 @@ fn core_color(idx: usize) -> Color {
     CORE_COLORS[idx % CORE_COLORS.len()]
 }
 
-const BAR_CHARS: [&str; 9] = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
+const BAR_FILL: &str = "|";
 
 pub fn render(frame: &mut Frame, app: &App) {
     let core_count = app.core_histories.len();
@@ -115,31 +115,16 @@ fn draw_core_bars(frame: &mut Frame, area: Rect, app: &App) {
         let label = format!("{:>2}[", idx);
         buf.set_string(x_start, row, &label, Style::default().fg(LABEL_COLOR));
 
-        // Bar fill
+        // Bar fill with pipe characters
         let bar_x = x_start + label.len() as u16;
-        let fill_sub = (usage / 100.0 * bar_width as f64 * 8.0).round() as usize;
-        let full_blocks = fill_sub / 8;
-        let remainder = fill_sub % 8;
+        let filled = (usage / 100.0 * bar_width as f64).round() as usize;
 
         for bx in 0..bar_width {
-            let ch = if bx < full_blocks {
-                "█"
-            } else if bx == full_blocks {
-                BAR_CHARS[remainder]
+            if bx < filled {
+                buf.set_string(bar_x + bx as u16, row, BAR_FILL, Style::default().fg(color));
             } else {
-                " "
-            };
-            let bar_color = if bx < full_blocks || (bx == full_blocks && remainder > 0) {
-                color
-            } else {
-                Color::Rgb(40, 40, 40)
-            };
-            buf.set_string(
-                bar_x + bx as u16,
-                row,
-                ch,
-                Style::default().fg(bar_color),
-            );
+                buf.set_string(bar_x + bx as u16, row, " ", Style::default().fg(Color::Rgb(40, 40, 40)));
+            }
         }
 
         // Closing bracket and percentage
