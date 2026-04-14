@@ -17,6 +17,8 @@ pub struct LineChart<'a> {
     x_labels: [String; 2],
     y_labels: [String; 2],
     rounded: bool,
+    left_aligned: bool,
+    direction_colors: Option<(Color, Color)>,
 }
 
 impl<'a> LineChart<'a> {
@@ -29,7 +31,19 @@ impl<'a> LineChart<'a> {
             x_labels: [String::new(), String::new()],
             y_labels: [String::new(), String::new()],
             rounded: false,
+            left_aligned: false,
+            direction_colors: None,
         }
+    }
+
+    pub fn left_aligned(mut self, left_aligned: bool) -> Self {
+        self.left_aligned = left_aligned;
+        self
+    }
+
+    pub fn direction_colors(mut self, rise: Color, fall: Color) -> Self {
+        self.direction_colors = Some((rise, fall));
+        self
     }
 
     pub fn rounded(mut self, rounded: bool) -> Self {
@@ -121,7 +135,7 @@ impl Widget for LineChart<'_> {
 
         // Data lines (rendered last so they layer on top)
         for dataset in &self.datasets {
-            render_line(buf, data_area, dataset, self.x_bounds, self.y_bounds, self.rounded);
+            render_line(buf, data_area, dataset, self.x_bounds, self.y_bounds, self.rounded, self.left_aligned, self.direction_colors);
         }
     }
 }
@@ -176,6 +190,8 @@ fn render_line(
     _x_bounds: [f64; 2],
     y_bounds: [f64; 2],
     rounded: bool,
+    left_aligned: bool,
+    direction_colors: Option<(Color, Color)>,
 ) {
     let data = dataset.data;
     if data.is_empty() || area.width == 0 || area.height == 0 {
@@ -199,11 +215,13 @@ fn render_line(
     };
 
     // Always 1:1 mapping — one data point per column.
-    // When fewer points than columns: right-align, leave left empty.
     // When more points than columns: show only the most recent `width` points.
-    // This gives exactly 1-column-per-tick scrolling with zero flicker.
+    // When fewer points than columns:
+    //   right-align (default) — leave left empty, data grows from right edge.
+    //   left-align — leave right empty, data starts from left edge.
     let (data_slice, col_offset) = if data_len <= width {
-        (data, width - data_len)
+        let offset = if left_aligned { 0 } else { width - data_len };
+        (data, offset)
     } else {
         (&data[data_len - width..], 0)
     };
@@ -212,7 +230,7 @@ fn render_line(
         col_rows[col_offset + i] = Some(value_to_row(y));
     }
 
-    let style = Style::default().fg(dataset.color);
+    let base_style = Style::default().fg(dataset.color);
     let mut prev_row: Option<u16> = None;
 
     let (top_left, top_right, bot_left, bot_right) = if rounded {
@@ -229,15 +247,22 @@ fn render_line(
 
         let x = area.x + col as u16;
 
+        let flat_style = direction_colors
+            .map(|(rise, _)| Style::default().fg(rise))
+            .unwrap_or(base_style);
+
         match prev_row {
             None => {
-                set_ch(buf, x, area.y + row, '─', style);
+                set_ch(buf, x, area.y + row, '─', flat_style);
             }
             Some(prev) if prev == row => {
-                set_ch(buf, x, area.y + row, '─', style);
+                set_ch(buf, x, area.y + row, '─', flat_style);
             }
             Some(prev) if prev > row => {
-                // Value went UP: previous row below, current row above
+                // Value went UP (row numbers decrease upward)
+                let style = direction_colors
+                    .map(|(rise, _)| Style::default().fg(rise))
+                    .unwrap_or(base_style);
                 set_ch(buf, x, area.y + row, top_left, style);
                 for r in (row + 1)..prev {
                     set_ch(buf, x, area.y + r, '│', style);
@@ -245,7 +270,10 @@ fn render_line(
                 set_ch(buf, x, area.y + prev, bot_right, style);
             }
             Some(prev) => {
-                // Value went DOWN: previous row above, current row below
+                // Value went DOWN
+                let style = direction_colors
+                    .map(|(_, fall)| Style::default().fg(fall))
+                    .unwrap_or(base_style);
                 set_ch(buf, x, area.y + prev, top_right, style);
                 for r in (prev + 1)..row {
                     set_ch(buf, x, area.y + r, '│', style);
