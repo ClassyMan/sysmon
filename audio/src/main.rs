@@ -21,7 +21,7 @@ const REFRESH_MS: u64 = 33; // ~30fps for smooth animation
 
 fn main() -> Result<()> {
     let audio = AudioCapture::start_monitor()?;
-    let device_name = "system monitor".to_string();
+    let device_name = audio.device_name.clone();
 
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();

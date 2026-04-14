@@ -10,5 +10,4 @@ ratatui = "0.30"
 crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
-cpal = "0.15"
 rustfft = "6"
