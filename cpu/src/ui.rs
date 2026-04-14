@@ -11,19 +11,16 @@ const BORDER_COLOR: Color = Color::DarkGray;
 const LABEL_COLOR: Color = Color::Gray;
 const TOTAL_COLOR: Color = Color::Rgb(120, 255, 180);
 
-const CORE_COLORS: [Color; 8] = [
-    Color::Rgb(255, 120, 120),
-    Color::Rgb(255, 180, 80),
-    Color::Rgb(255, 255, 100),
-    Color::Rgb(120, 255, 120),
-    Color::Rgb(100, 220, 255),
-    Color::Rgb(140, 140, 255),
-    Color::Rgb(220, 140, 255),
-    Color::Rgb(255, 140, 200),
-];
-
-fn core_color(idx: usize) -> Color {
-    CORE_COLORS[idx % CORE_COLORS.len()]
+fn usage_color(pct: f64) -> Color {
+    if pct < 30.0 {
+        Color::Rgb(80, 220, 100)
+    } else if pct < 60.0 {
+        Color::Rgb(220, 220, 60)
+    } else if pct < 85.0 {
+        Color::Rgb(255, 160, 40)
+    } else {
+        Color::Rgb(255, 70, 70)
+    }
 }
 
 const BAR_FILL: &str = "|";
@@ -109,7 +106,7 @@ fn draw_core_bars(frame: &mut Frame, area: Rect, app: &App) {
 
         let x_start = inner.x + (col_idx * col_width) as u16;
         let row = inner.y + row_idx as u16;
-        let color = core_color(idx);
+        let color = usage_color(usage);
 
         // Core label: "0["
         let label = format!("{:>2}[", idx);
