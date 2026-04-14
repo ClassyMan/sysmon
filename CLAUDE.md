@@ -1,6 +1,6 @@
 # sysmon
 
-Cargo workspace with 7 real-time Linux system monitors (Rust + ratatui).
+Cargo workspace with 8 real-time monitors (Rust + ratatui).
 
 ## Crates
 - `shared/` — line_chart, ring_buffer, sticky_max (shared library)
@@ -10,6 +10,7 @@ Cargo workspace with 7 real-time Linux system monitors (Rust + ratatui).
 - `dio/` — disk IOPS and latency
 - `net/` — network throughput + matrix rain mode
 - `audio/` — FFT spectrum analyzer (PipeWire)
+- `poly/` — Polymarket prediction market dashboard (Gamma + CLOB APIs)
 
 ## Build & install
 ```bash
@@ -27,7 +28,7 @@ cargo llvm-cov --workspace --summary-only    # coverage
 ## Release
 All binaries released together from the monorepo:
 ```bash
-gh release create vX.Y.Z target/release/cpu target/release/gpu target/release/ram target/release/dio target/release/net target/release/audio
+gh release create vX.Y.Z target/release/cpu target/release/gpu target/release/ram target/release/dio target/release/net target/release/audio target/release/poly
 ```
 
 ## Chart rendering rules (hard-won)
@@ -47,3 +48,11 @@ gh release create vX.Y.Z target/release/cpu target/release/gpu target/release/ra
 - `f` — toggle fast mode (25ms/3s)
 - `d` / `D` — cycle devices/interfaces (dio, net)
 - `v` — toggle view mode (net: charts ↔ rain)
+- `j`/`k` / `↓`/`↑` — scroll markets (poly)
+
+## poly-specific notes
+- Fetches from Polymarket Gamma API (events/metadata) and CLOB API (price history)
+- No auth needed — read-only public endpoints
+- Background thread handles HTTP; main thread never blocks on network
+- Default 30s refresh, fast mode 5s — Gamma rate limit is 500/10s so both are safe
+- Uses `reqwest` blocking + `serde` (only crate in workspace with HTTP deps)
