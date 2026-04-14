@@ -80,62 +80,34 @@ impl SpectrumAnalyzer {
     }
 
     pub fn get_bar_values(&self, bar_count: usize, sample_rate: u32) -> Vec<f32> {
-        if self.bins.is_empty() || bar_count == 0 {
-            return vec![0.0; bar_count];
-        }
-
-        let max_freq = 18000.0_f32;
-        let min_freq = 30.0_f32;
-
-        (0..bar_count)
-            .map(|bar_idx| {
-                let frac_low = bar_idx as f32 / bar_count as f32;
-                let frac_high = (bar_idx + 1) as f32 / bar_count as f32;
-
-                let freq_low = min_freq * (max_freq / min_freq).powf(frac_low);
-                let freq_high = min_freq * (max_freq / min_freq).powf(frac_high);
-
-                let bin_low = (freq_low / sample_rate as f32 * self.fft_size as f32)
-                    .floor() as usize;
-                let bin_high = (freq_high / sample_rate as f32 * self.fft_size as f32)
-                    .ceil() as usize;
-
-                let bin_low = bin_low.clamp(0, self.bins.len().saturating_sub(1));
-                let bin_high = bin_high.clamp(bin_low + 1, self.bins.len());
-
-                self.bins[bin_low..bin_high]
-                    .iter()
-                    .copied()
-                    .fold(0.0_f32, f32::max)
-            })
-            .collect()
+        self.map_bins_to_bars(&self.bins, bar_count, sample_rate)
     }
 
     pub fn get_peak_values(&self, bar_count: usize, sample_rate: u32) -> Vec<f32> {
-        if self.peak_bins.is_empty() || bar_count == 0 {
+        self.map_bins_to_bars(&self.peak_bins, bar_count, sample_rate)
+    }
+
+    fn map_bins_to_bars(&self, bins: &[f32], bar_count: usize, sample_rate: u32) -> Vec<f32> {
+        if bins.is_empty() || bar_count == 0 {
             return vec![0.0; bar_count];
         }
 
-        let max_freq = 18000.0_f32;
-        let min_freq = 30.0_f32;
+        let max_freq = (sample_rate / 2) as f32;
 
         (0..bar_count)
             .map(|bar_idx| {
-                let frac_low = bar_idx as f32 / bar_count as f32;
-                let frac_high = (bar_idx + 1) as f32 / bar_count as f32;
-
-                let freq_low = min_freq * (max_freq / min_freq).powf(frac_low);
-                let freq_high = min_freq * (max_freq / min_freq).powf(frac_high);
+                let freq_low = bar_idx as f32 / bar_count as f32 * max_freq;
+                let freq_high = (bar_idx + 1) as f32 / bar_count as f32 * max_freq;
 
                 let bin_low = (freq_low / sample_rate as f32 * self.fft_size as f32)
                     .floor() as usize;
                 let bin_high = (freq_high / sample_rate as f32 * self.fft_size as f32)
                     .ceil() as usize;
 
-                let bin_low = bin_low.clamp(0, self.peak_bins.len().saturating_sub(1));
-                let bin_high = bin_high.clamp(bin_low + 1, self.peak_bins.len());
+                let bin_low = bin_low.clamp(0, bins.len().saturating_sub(1));
+                let bin_high = bin_high.clamp(bin_low + 1, bins.len());
 
-                self.peak_bins[bin_low..bin_high]
+                bins[bin_low..bin_high]
                     .iter()
                     .copied()
                     .fold(0.0_f32, f32::max)

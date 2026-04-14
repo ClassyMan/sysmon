@@ -120,34 +120,29 @@ fn draw_freq_labels(frame: &mut Frame, area: Rect) {
         return;
     }
 
-    let labels = ["30Hz", "100", "300", "1K", "3K", "10K", "18K"];
-    let positions: Vec<f32> = labels.iter().map(|label| {
-        let freq: f32 = match *label {
-            "30Hz" => 30.0,
-            "100" => 100.0,
-            "300" => 300.0,
-            "1K" => 1000.0,
-            "3K" => 3000.0,
-            "10K" => 10000.0,
-            "18K" => 18000.0,
-            _ => 0.0,
-        };
-        let min_freq = 30.0_f32;
-        let max_freq = 18000.0_f32;
-        (freq / min_freq).log10() / (max_freq / min_freq).log10()
-    }).collect();
+    let labels = ["0Hz", "5K", "10K", "15K", "20K"];
+    let max_freq = 22050.0_f32;
 
     let mut spans = Vec::new();
     let mut last_pos = 0usize;
 
-    for (label, &frac) in labels.iter().zip(positions.iter()) {
+    for label in &labels {
+        let freq: f32 = match *label {
+            "0Hz" => 0.0,
+            "5K" => 5000.0,
+            "10K" => 10000.0,
+            "15K" => 15000.0,
+            "20K" => 20000.0,
+            _ => 0.0,
+        };
+        let frac = freq / max_freq;
         let target_col = (frac * (width - 1) as f32).round() as usize;
-        if target_col > last_pos {
+        if target_col >= last_pos {
             let padding = target_col - last_pos;
             spans.push(Span::raw(" ".repeat(padding)));
+            spans.push(Span::styled(*label, Style::default().fg(LABEL_COLOR)));
+            last_pos = target_col + label.len();
         }
-        spans.push(Span::styled(*label, Style::default().fg(LABEL_COLOR)));
-        last_pos = target_col + label.len();
     }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
