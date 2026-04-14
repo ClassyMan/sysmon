@@ -1,0 +1,107 @@
+use anyhow::Result;
+
+use crate::collector::{self, GpuProcess, GpuSnapshot};
+use sysmon_shared::ring_buffer::RingBuffer;
+use sysmon_shared::sticky_max::StickyMax;
+
+const FAST_REFRESH_MS: u64 = 25;
+const FAST_SCROLLBACK_SECS: u64 = 3;
+
+pub struct App {
+    pub gpu_util_history: RingBuffer,
+    pub mem_util_history: RingBuffer,
+    pub vram_pct_history: RingBuffer,
+    pub temp_history: RingBuffer,
+    pub power_history: RingBuffer,
+
+    pub latest: Option<GpuSnapshot>,
+    pub processes: Vec<GpuProcess>,
+    pub should_quit: bool,
+    pub scrollback_secs: u64,
+    pub fast_mode: bool,
+    pub refresh_ms: u64,
+    pub gpu_util_y: StickyMax,
+    pub power_y: StickyMax,
+    normal_refresh_ms: u64,
+    normal_scrollback_secs: u64,
+}
+
+impl App {
+    pub fn new(refresh_ms: u64, scrollback_secs: u64) -> Self {
+        let capacity = min_capacity(refresh_ms, scrollback_secs);
+        Self {
+            gpu_util_history: RingBuffer::new(capacity),
+            mem_util_history: RingBuffer::new(capacity),
+            vram_pct_history: RingBuffer::new(capacity),
+            temp_history: RingBuffer::new(capacity),
+            power_history: RingBuffer::new(capacity),
+            latest: None,
+            processes: Vec::new(),
+            should_quit: false,
+            scrollback_secs,
+            fast_mode: false,
+            refresh_ms,
+            gpu_util_y: StickyMax::new(),
+            power_y: StickyMax::new(),
+            normal_refresh_ms: refresh_ms,
+            normal_scrollback_secs: scrollback_secs,
+        }
+    }
+
+    pub fn chart_capacity(&self) -> usize {
+        self.gpu_util_history.capacity()
+    }
+
+    pub fn toggle_fast_mode(&mut self) {
+        self.fast_mode = !self.fast_mode;
+
+        let (new_refresh, new_scrollback) = if self.fast_mode {
+            (FAST_REFRESH_MS, FAST_SCROLLBACK_SECS)
+        } else {
+            (self.normal_refresh_ms, self.normal_scrollback_secs)
+        };
+
+        self.refresh_ms = new_refresh;
+        self.scrollback_secs = new_scrollback;
+
+        let capacity = min_capacity(new_refresh, new_scrollback);
+        self.gpu_util_history = RingBuffer::new(capacity);
+        self.mem_util_history = RingBuffer::new(capacity);
+        self.vram_pct_history = RingBuffer::new(capacity);
+        self.temp_history = RingBuffer::new(capacity);
+        self.power_history = RingBuffer::new(capacity);
+        self.gpu_util_y.reset();
+        self.power_y.reset();
+    }
+
+    pub fn refresh_rate(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.refresh_ms)
+    }
+
+    pub fn tick(&mut self) -> Result<()> {
+        let snap = collector::read_gpu_snapshot()?;
+
+        self.gpu_util_history.push(snap.gpu_util_pct);
+        self.mem_util_history.push(snap.mem_util_pct);
+        self.vram_pct_history.push(snap.vram_pct());
+        self.temp_history.push(snap.temp_celsius);
+        self.power_history.push(snap.power_watts);
+
+        self.gpu_util_y.update(
+            self.gpu_util_history.max().max(self.mem_util_history.max()),
+        );
+        self.power_y.update(snap.power_limit_watts);
+
+        self.processes = collector::read_gpu_processes();
+        self.latest = Some(snap);
+        Ok(())
+    }
+}
+
+fn min_capacity(refresh_ms: u64, scrollback_secs: u64) -> usize {
+    let time_based = ((scrollback_secs * 1000) / refresh_ms) as usize;
+    let term_width = crossterm::terminal::size()
+        .map(|(w, _)| w as usize)
+        .unwrap_or(200);
+    time_based.max(term_width)
+}

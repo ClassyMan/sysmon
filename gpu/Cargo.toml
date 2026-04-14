@@ -1,0 +1,13 @@
+[package]
+name = "gpu"
+version = "0.1.0"
+edition = "2024"
+description = "GPU monitor with real-time terminal charts"
+license = "MIT"
+
+[dependencies]
+sysmon-shared = { path = "../shared" }
+ratatui = "0.30"
+crossterm = "0.29"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
