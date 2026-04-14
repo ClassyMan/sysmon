@@ -16,6 +16,7 @@ pub struct LineChart<'a> {
     y_bounds: [f64; 2],
     x_labels: [String; 2],
     y_labels: [String; 2],
+    rounded: bool,
 }
 
 impl<'a> LineChart<'a> {
@@ -27,7 +28,13 @@ impl<'a> LineChart<'a> {
             y_bounds: [0.0, 1.0],
             x_labels: [String::new(), String::new()],
             y_labels: [String::new(), String::new()],
+            rounded: false,
         }
+    }
+
+    pub fn rounded(mut self, rounded: bool) -> Self {
+        self.rounded = rounded;
+        self
     }
 
     pub fn block(mut self, block: Block<'a>) -> Self {
@@ -114,7 +121,7 @@ impl Widget for LineChart<'_> {
 
         // Data lines (rendered last so they layer on top)
         for dataset in &self.datasets {
-            render_line(buf, data_area, dataset, self.x_bounds, self.y_bounds);
+            render_line(buf, data_area, dataset, self.x_bounds, self.y_bounds, self.rounded);
         }
     }
 }
@@ -168,6 +175,7 @@ fn render_line(
     dataset: &Dataset,
     _x_bounds: [f64; 2],
     y_bounds: [f64; 2],
+    rounded: bool,
 ) {
     let data = dataset.data;
     if data.is_empty() || area.width == 0 || area.height == 0 {
@@ -207,6 +215,12 @@ fn render_line(
     let style = Style::default().fg(dataset.color);
     let mut prev_row: Option<u16> = None;
 
+    let (top_left, top_right, bot_left, bot_right) = if rounded {
+        ('╭', '╮', '╰', '╯')
+    } else {
+        ('┌', '┐', '└', '┘')
+    };
+
     for (col, cell_row) in col_rows.iter().enumerate() {
         let Some(&row) = cell_row.as_ref() else {
             prev_row = None;
@@ -224,19 +238,19 @@ fn render_line(
             }
             Some(prev) if prev > row => {
                 // Value went UP: previous row below, current row above
-                set_ch(buf, x, area.y + row, '┌', style);
+                set_ch(buf, x, area.y + row, top_left, style);
                 for r in (row + 1)..prev {
                     set_ch(buf, x, area.y + r, '│', style);
                 }
-                set_ch(buf, x, area.y + prev, '┘', style);
+                set_ch(buf, x, area.y + prev, bot_right, style);
             }
             Some(prev) => {
                 // Value went DOWN: previous row above, current row below
-                set_ch(buf, x, area.y + prev, '┐', style);
+                set_ch(buf, x, area.y + prev, top_right, style);
                 for r in (prev + 1)..row {
                     set_ch(buf, x, area.y + r, '│', style);
                 }
-                set_ch(buf, x, area.y + row, '└', style);
+                set_ch(buf, x, area.y + row, bot_left, style);
             }
         }
 
