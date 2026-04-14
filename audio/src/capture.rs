@@ -81,16 +81,14 @@ impl AudioCapture {
     }
 
     pub fn take_samples(&self, count: usize) -> Vec<f32> {
-        let mut buf = self.buffer.lock().unwrap();
+        let buf = self.buffer.lock().unwrap();
         if buf.len() >= count {
-            let start = buf.len() - count;
-            let samples = buf[start..].to_vec();
-            buf.clear();
-            samples
+            // Return the last `count` samples WITHOUT clearing.
+            // The buffer is a rolling window — the writer thread
+            // trims it to 48000 max, so it doesn't grow unbounded.
+            buf[buf.len() - count..].to_vec()
         } else {
-            let samples = buf.clone();
-            buf.clear();
-            samples
+            buf.clone()
         }
     }
 }
