@@ -46,57 +46,54 @@ pub fn list_interfaces() -> Vec<InterfaceInfo> {
         return Vec::new();
     };
 
-    let mut ifaces: Vec<InterfaceInfo> = entries
+    let raw: Vec<InterfaceInfo> = entries
         .flatten()
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().to_string();
-            if name == "lo"
-                || name.starts_with("veth")
-                || name.starts_with("br-")
-                || name.starts_with("docker")
-            {
-                return None;
-            }
-
             let operstate = read_trimmed(&format!("/sys/class/net/{}/operstate", name))
                 .unwrap_or_default();
-
             let speed_mbps = read_trimmed(&format!("/sys/class/net/{}/speed", name))
                 .and_then(|s| s.parse::<i64>().ok())
                 .filter(|&s| s > 0)
                 .map(|s| s as u64);
-
             let ip = read_ip(&name);
-
-            Some(InterfaceInfo {
-                name,
-                ip,
-                speed_mbps,
-                operstate,
-            })
+            Some(InterfaceInfo { name, ip, speed_mbps, operstate })
         })
         .collect();
 
-    // Sort: physical interfaces with IPs first, then virtual/down interfaces
-    ifaces.sort_by(|iface_a, iface_b| {
-        let score = |iface: &InterfaceInfo| -> u8 {
-            let is_physical = iface.name.starts_with("enp")
-                || iface.name.starts_with("eth")
-                || iface.name.starts_with("wlp")
-                || iface.name.starts_with("wlan");
-            let has_ip = !iface.ip.is_empty();
-            let is_up = iface.operstate == "up";
-            match (is_physical, has_ip, is_up) {
-                (true, true, true) => 0,
-                (true, true, false) => 1,
-                (false, true, true) => 2,
-                (false, true, false) => 3,
-                (_, false, _) => 4,
-            }
-        };
-        score(iface_a).cmp(&score(iface_b))
-    });
+    filter_and_sort_interfaces(raw)
+}
 
+fn is_excluded(name: &str) -> bool {
+    name == "lo"
+        || name.starts_with("veth")
+        || name.starts_with("br-")
+        || name.starts_with("docker")
+}
+
+fn interface_score(iface: &InterfaceInfo) -> u8 {
+    let is_physical = iface.name.starts_with("enp")
+        || iface.name.starts_with("eth")
+        || iface.name.starts_with("wlp")
+        || iface.name.starts_with("wlan");
+    let has_ip = !iface.ip.is_empty();
+    let is_up = iface.operstate == "up";
+    match (is_physical, has_ip, is_up) {
+        (true, true, true) => 0,
+        (true, true, false) => 1,
+        (false, true, true) => 2,
+        (false, true, false) => 3,
+        (_, false, _) => 4,
+    }
+}
+
+fn filter_and_sort_interfaces(raw: Vec<InterfaceInfo>) -> Vec<InterfaceInfo> {
+    let mut ifaces: Vec<InterfaceInfo> = raw
+        .into_iter()
+        .filter(|iface| !is_excluded(&iface.name))
+        .collect();
+
+    ifaces.sort_by(|iface_a, iface_b| interface_score(iface_a).cmp(&interface_score(iface_b)));
     ifaces
 }
 
@@ -146,17 +143,20 @@ fn read_ip(interface: &str) -> String {
 
     match output {
         Ok(out) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            text.split_whitespace()
-                .nth(2)
-                .unwrap_or("")
-                .split('/')
-                .next()
-                .unwrap_or("")
-                .to_string()
+            parse_ip_brief(&String::from_utf8_lossy(&out.stdout))
         }
         _ => String::new(),
     }
+}
+
+fn parse_ip_brief(text: &str) -> String {
+    text.split_whitespace()
+        .nth(2)
+        .unwrap_or("")
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .to_string()
 }
 
 fn read_trimmed(path: &str) -> Option<String> {
@@ -208,6 +208,128 @@ wlp4s0: 981325664 7940576    0    0    0     0          0         0 137260438  1
         let rates = NetRates::from_deltas(&prev, &curr, 1.0);
         assert!((rates.rx_bytes_per_sec - 1000.0).abs() < 0.01);
         assert!((rates.tx_bytes_per_sec - 1000.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_is_excluded_loopback() {
+        assert!(is_excluded("lo"));
+    }
+
+    #[test]
+    fn test_is_excluded_veth() {
+        assert!(is_excluded("veth1234abc"));
+    }
+
+    #[test]
+    fn test_is_excluded_docker() {
+        assert!(is_excluded("docker0"));
+    }
+
+    #[test]
+    fn test_is_excluded_bridge() {
+        assert!(is_excluded("br-abcdef123456"));
+    }
+
+    #[test]
+    fn test_not_excluded_physical() {
+        assert!(!is_excluded("enp5s0"));
+        assert!(!is_excluded("wlan0"));
+        assert!(!is_excluded("eth0"));
+    }
+
+    #[test]
+    fn test_interface_score_physical_up_with_ip() {
+        let iface = InterfaceInfo {
+            name: "enp5s0".to_string(),
+            ip: "192.168.1.1".to_string(),
+            speed_mbps: Some(1000),
+            operstate: "up".to_string(),
+        };
+        assert_eq!(interface_score(&iface), 0);
+    }
+
+    #[test]
+    fn test_interface_score_physical_down_with_ip() {
+        let iface = InterfaceInfo {
+            name: "eth0".to_string(),
+            ip: "10.0.0.1".to_string(),
+            speed_mbps: None,
+            operstate: "down".to_string(),
+        };
+        assert_eq!(interface_score(&iface), 1);
+    }
+
+    #[test]
+    fn test_interface_score_virtual_up_with_ip() {
+        let iface = InterfaceInfo {
+            name: "tailscale0".to_string(),
+            ip: "100.64.0.1".to_string(),
+            speed_mbps: None,
+            operstate: "up".to_string(),
+        };
+        assert_eq!(interface_score(&iface), 2);
+    }
+
+    #[test]
+    fn test_interface_score_no_ip() {
+        let iface = InterfaceInfo {
+            name: "enp5s0".to_string(),
+            ip: String::new(),
+            speed_mbps: Some(1000),
+            operstate: "up".to_string(),
+        };
+        assert_eq!(interface_score(&iface), 4);
+    }
+
+    #[test]
+    fn test_filter_and_sort_excludes_and_orders() {
+        let raw = vec![
+            InterfaceInfo {
+                name: "lo".to_string(),
+                ip: "127.0.0.1".to_string(),
+                speed_mbps: None,
+                operstate: "unknown".to_string(),
+            },
+            InterfaceInfo {
+                name: "tailscale0".to_string(),
+                ip: "100.64.0.1".to_string(),
+                speed_mbps: None,
+                operstate: "up".to_string(),
+            },
+            InterfaceInfo {
+                name: "enp5s0".to_string(),
+                ip: "192.168.1.100".to_string(),
+                speed_mbps: Some(1000),
+                operstate: "up".to_string(),
+            },
+            InterfaceInfo {
+                name: "docker0".to_string(),
+                ip: "172.17.0.1".to_string(),
+                speed_mbps: None,
+                operstate: "down".to_string(),
+            },
+        ];
+        let sorted = filter_and_sort_interfaces(raw);
+        assert_eq!(sorted.len(), 2);
+        assert_eq!(sorted[0].name, "enp5s0");
+        assert_eq!(sorted[1].name, "tailscale0");
+    }
+
+    #[test]
+    fn test_parse_ip_brief_normal() {
+        let output = "enp5s0           UP             192.168.1.100/24\n";
+        assert_eq!(parse_ip_brief(output), "192.168.1.100");
+    }
+
+    #[test]
+    fn test_parse_ip_brief_no_ip() {
+        let output = "enp5s0           DOWN\n";
+        assert_eq!(parse_ip_brief(output), "");
+    }
+
+    #[test]
+    fn test_parse_ip_brief_empty() {
+        assert_eq!(parse_ip_brief(""), "");
     }
 
     #[test]

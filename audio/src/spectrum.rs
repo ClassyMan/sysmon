@@ -183,6 +183,48 @@ mod tests {
     }
 
     #[test]
+    fn test_frequency_at_bin() {
+        let analyzer = SpectrumAnalyzer::new(1024);
+        let freq = analyzer.frequency_at_bin(10, 44100);
+        let expected = 10.0 * 44100.0 / 1024.0;
+        assert!((freq - expected).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_frequency_at_bin_zero() {
+        let analyzer = SpectrumAnalyzer::new(1024);
+        assert_eq!(analyzer.frequency_at_bin(0, 44100), 0.0);
+    }
+
+    #[test]
+    fn test_get_bar_values_empty_bins() {
+        let analyzer = SpectrumAnalyzer::new(1024);
+        let bars = analyzer.get_bar_values(0, 44100);
+        assert!(bars.is_empty());
+    }
+
+    #[test]
+    fn test_get_peak_values_correct_count() {
+        let analyzer = SpectrumAnalyzer::new(1024);
+        let peaks = analyzer.get_peak_values(64, 44100);
+        assert_eq!(peaks.len(), 64);
+    }
+
+    #[test]
+    fn test_process_short_input_decays() {
+        let mut analyzer = SpectrumAnalyzer::new(1024);
+        let loud: Vec<f32> = (0..1024)
+            .map(|idx| (2.0 * std::f32::consts::PI * 440.0 * idx as f32 / 44100.0).sin())
+            .collect();
+        analyzer.process(&loud);
+        let max_before = analyzer.bins.iter().copied().fold(0.0_f32, f32::max);
+
+        analyzer.process(&[0.0; 100]); // shorter than fft_size triggers decay
+        let max_after = analyzer.bins.iter().copied().fold(0.0_f32, f32::max);
+        assert!(max_after < max_before, "bins should decay with short input");
+    }
+
+    #[test]
     fn test_peaks_decay() {
         let mut analyzer = SpectrumAnalyzer::new(1024);
         let loud: Vec<f32> = (0..1024)
