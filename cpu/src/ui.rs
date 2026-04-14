@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::App;
 use sysmon_shared::line_chart::{self, LineChart};
@@ -26,19 +26,24 @@ fn core_color(idx: usize) -> Color {
     CORE_COLORS[idx % CORE_COLORS.len()]
 }
 
+const BAR_CHARS: [&str; 9] = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
+
 pub fn render(frame: &mut Frame, app: &App) {
+    let core_count = app.core_histories.len();
+    let bar_rows = (core_count + 3) / 4; // 4 cores per row
+
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),      // header
-            Constraint::Length(3),      // total gauge
-            Constraint::Min(6),         // per-core charts
+            Constraint::Length(1),
+            Constraint::Length(bar_rows as u16 + 2),
+            Constraint::Min(6),
         ])
         .split(frame.area());
 
     draw_header(frame, outer[0], app);
-    draw_total_gauge(frame, outer[1], app);
-    draw_core_charts(frame, outer[2], app);
+    draw_core_bars(frame, outer[1], app);
+    draw_total_chart(frame, outer[2], app);
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -76,84 +81,99 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(text, area);
 }
 
-fn draw_total_gauge(frame: &mut Frame, area: Rect, app: &App) {
-    let label = format!("Total: {:.0}%", app.total_usage);
-    let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BORDER_COLOR)))
-        .gauge_style(Style::default().fg(TOTAL_COLOR).add_modifier(Modifier::BOLD))
-        .label(Span::styled(label, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
-        .ratio((app.total_usage / 100.0).clamp(0.0, 1.0));
-    frame.render_widget(gauge, area);
-}
+fn draw_core_bars(frame: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(BORDER_COLOR));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-fn draw_core_charts(frame: &mut Frame, area: Rect, app: &App) {
-    let core_count = app.core_histories.len();
-    if core_count == 0 {
+    if inner.width < 20 || inner.height == 0 {
         return;
     }
 
-    // Arrange in a grid: 2 columns, as many rows as needed
-    let rows_needed = (core_count + 1) / 2;
-    let row_constraints: Vec<Constraint> = (0..rows_needed)
-        .map(|_| Constraint::Ratio(1, rows_needed as u32))
-        .collect();
+    let core_count = app.core_usages.len();
+    let cols = 4usize;
+    let col_width = inner.width as usize / cols;
+    let bar_width = col_width.saturating_sub(10); // "XX[████] NNN% "
 
-    let row_areas = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(row_constraints)
-        .split(area);
+    let buf = frame.buffer_mut();
 
-    let capacity = app.chart_capacity() as f64;
-    let x_labels = [format!("{}s", app.scrollback_secs), "0s".to_string()];
+    for (idx, &usage) in app.core_usages.iter().enumerate() {
+        let col_idx = idx % cols;
+        let row_idx = idx / cols;
 
-    for row_idx in 0..rows_needed {
-        let [left_area, right_area] =
-            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .areas(row_areas[row_idx]);
-
-        let left_core = row_idx * 2;
-        let right_core = row_idx * 2 + 1;
-
-        draw_single_core(frame, left_area, app, left_core, capacity, &x_labels);
-        if right_core < core_count {
-            draw_single_core(frame, right_area, app, right_core, capacity, &x_labels);
+        if row_idx >= inner.height as usize {
+            break;
         }
+
+        let x_start = inner.x + (col_idx * col_width) as u16;
+        let row = inner.y + row_idx as u16;
+        let color = core_color(idx);
+
+        // Core label: "0["
+        let label = format!("{:>2}[", idx);
+        buf.set_string(x_start, row, &label, Style::default().fg(LABEL_COLOR));
+
+        // Bar fill
+        let bar_x = x_start + label.len() as u16;
+        let fill_sub = (usage / 100.0 * bar_width as f64 * 8.0).round() as usize;
+        let full_blocks = fill_sub / 8;
+        let remainder = fill_sub % 8;
+
+        for bx in 0..bar_width {
+            let ch = if bx < full_blocks {
+                "█"
+            } else if bx == full_blocks {
+                BAR_CHARS[remainder]
+            } else {
+                " "
+            };
+            let bar_color = if bx < full_blocks || (bx == full_blocks && remainder > 0) {
+                color
+            } else {
+                Color::Rgb(40, 40, 40)
+            };
+            buf.set_string(
+                bar_x + bx as u16,
+                row,
+                ch,
+                Style::default().fg(bar_color),
+            );
+        }
+
+        // Closing bracket and percentage
+        let suffix = format!("]{:>5.1}%", usage);
+        buf.set_string(
+            bar_x + bar_width as u16,
+            row,
+            &suffix,
+            Style::default().fg(LABEL_COLOR),
+        );
     }
 }
 
-fn draw_single_core(
-    frame: &mut Frame,
-    area: Rect,
-    app: &App,
-    core_idx: usize,
-    capacity: f64,
-    x_labels: &[String; 2],
-) {
-    let mut data = Vec::new();
-    app.core_histories[core_idx].as_chart_data(&mut data);
+fn draw_total_chart(frame: &mut Frame, area: Rect, app: &App) {
+    let mut total_data = Vec::new();
+    app.total_history.as_chart_data(&mut total_data);
 
-    let usage = app.core_usages.get(core_idx).copied().unwrap_or(0.0);
-    let color = core_color(core_idx);
-
-    let freq = crate::collector::read_core_freq_mhz(core_idx);
-    let freq_str = freq.map_or_else(String::new, |f| format!(" {:.0}MHz", f));
-
-    let label = format!("{:.0}%{}", usage, freq_str);
+    let capacity = app.chart_capacity() as f64;
+    let label = format!("Total: {:.0}%", app.total_usage);
 
     let chart = LineChart::new(vec![line_chart::Dataset {
-        data: &data,
-        color,
+        data: &total_data,
+        color: TOTAL_COLOR,
         name: label,
     }])
     .block(
         Block::default()
-            .title(format!(" core {} ", core_idx))
+            .title(" Total Utilization ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(BORDER_COLOR)),
     )
     .x_bounds([0.0, capacity - 1.0])
     .y_bounds([0.0, 100.0])
-    .x_labels(x_labels.clone())
+    .x_labels([format!("{}s", app.scrollback_secs), "0s".to_string()])
     .y_labels(["0%".to_string(), "100%".to_string()]);
 
     frame.render_widget(chart, area);
