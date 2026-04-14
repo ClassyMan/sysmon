@@ -228,7 +228,9 @@ fn draw_chart(frame: &mut Frame, area: Rect, app: &App) {
     .y_bounds([y_floor, y_ceil])
     .x_labels(["7d".to_string(), "now".to_string()])
     .y_labels([format!("{:.0}%", y_floor), format!("{:.0}%", y_ceil)])
-    .rounded(true);
+    .rounded(true)
+    .left_aligned(true)
+    .direction_colors(Color::Rgb(100, 255, 100), Color::Rgb(255, 100, 100));
 
     frame.render_widget(chart, area);
 }

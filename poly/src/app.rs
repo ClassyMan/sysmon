@@ -32,8 +32,8 @@ impl App {
             refresh_ms,
             last_error: None,
             last_update: None,
-            topic: Topic::All,
-            sort_order: SortOrder::Volume24h,
+            topic: Topic::Geopolitics,
+            sort_order: SortOrder::MonitoringTheSituation,
             normal_refresh_ms: refresh_ms,
         }
     }
@@ -208,8 +208,8 @@ mod tests {
             refresh_ms: 30000,
             last_error: None,
             last_update: None,
-            topic: Topic::All,
-            sort_order: SortOrder::Volume24h,
+            topic: Topic::Geopolitics,
+            sort_order: SortOrder::MonitoringTheSituation,
             normal_refresh_ms: 30000,
         }
     }
@@ -331,9 +331,9 @@ mod tests {
     #[test]
     fn test_cycle_topic() {
         let mut app = test_app(test_events());
-        assert_eq!(app.topic, Topic::All);
+        assert_eq!(app.topic, Topic::Geopolitics);
         app.cycle_topic();
-        assert_eq!(app.topic, Topic::Politics);
+        assert_eq!(app.topic, Topic::Esports);
         assert!(app.events.is_empty());
         assert_eq!(app.selected, 0);
     }
@@ -342,15 +342,15 @@ mod tests {
     fn test_cycle_topic_prev() {
         let mut app = test_app(Vec::new());
         app.cycle_topic_prev();
-        assert_eq!(app.topic, *Topic::ALL.last().unwrap());
+        assert_eq!(app.topic, Topic::Crypto);
     }
 
     #[test]
     fn test_cycle_sort() {
         let mut app = test_app(test_events());
-        assert_eq!(app.sort_order, SortOrder::Volume24h);
+        assert_eq!(app.sort_order, SortOrder::MonitoringTheSituation);
         app.cycle_sort();
-        assert_eq!(app.sort_order, SortOrder::Volume);
+        assert_eq!(app.sort_order, SortOrder::Volume24h);
         assert!(app.events.is_empty());
     }
 
@@ -359,7 +359,7 @@ mod tests {
         let mut app = test_app(Vec::new());
         app.cycle_topic();
         let state = app.shared.lock().unwrap();
-        assert_eq!(state.topic, Topic::Politics);
+        assert_eq!(state.topic, Topic::Esports);
         assert!(state.filter_changed);
     }
 
@@ -368,7 +368,7 @@ mod tests {
         let mut app = test_app(Vec::new());
         app.cycle_sort();
         let state = app.shared.lock().unwrap();
-        assert_eq!(state.sort_order, SortOrder::Volume);
+        assert_eq!(state.sort_order, SortOrder::Volume24h);  // MonitoringTheSituation -> Volume24h
         assert!(state.filter_changed);
     }
 

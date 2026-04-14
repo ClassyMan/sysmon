@@ -17,6 +17,9 @@ pub enum Topic {
     Geopolitics,
     Esports,
     Elections,
+    Science,
+    Ai,
+    Business,
 }
 
 impl Topic {
@@ -28,6 +31,9 @@ impl Topic {
         Topic::Geopolitics,
         Topic::Esports,
         Topic::Elections,
+        Topic::Science,
+        Topic::Ai,
+        Topic::Business,
     ];
 
     pub fn label(self) -> &'static str {
@@ -39,6 +45,9 @@ impl Topic {
             Topic::Geopolitics => "Geopolitics",
             Topic::Esports => "Esports",
             Topic::Elections => "Elections",
+            Topic::Science => "Science",
+            Topic::Ai => "AI",
+            Topic::Business => "Business",
         }
     }
 
@@ -51,6 +60,9 @@ impl Topic {
             Topic::Geopolitics => Some("geopolitics"),
             Topic::Esports => Some("esports"),
             Topic::Elections => Some("elections"),
+            Topic::Science => Some("science"),
+            Topic::Ai => Some("ai"),
+            Topic::Business => Some("business"),
         }
     }
 
@@ -69,6 +81,7 @@ impl Topic {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortOrder {
+    MonitoringTheSituation,
     Volume24h,
     Volume,
     Liquidity,
@@ -78,6 +91,7 @@ pub enum SortOrder {
 
 impl SortOrder {
     pub const ALL: &[SortOrder] = &[
+        SortOrder::MonitoringTheSituation,
         SortOrder::Volume24h,
         SortOrder::Volume,
         SortOrder::Liquidity,
@@ -87,6 +101,7 @@ impl SortOrder {
 
     pub fn label(self) -> &'static str {
         match self {
+            SortOrder::MonitoringTheSituation => "Monitoring the Situation",
             SortOrder::Volume24h => "24h Volume",
             SortOrder::Volume => "All-time Vol",
             SortOrder::Liquidity => "Liquidity",
@@ -97,11 +112,19 @@ impl SortOrder {
 
     fn api_param(self) -> &'static str {
         match self {
+            SortOrder::MonitoringTheSituation => "volume24hr",
             SortOrder::Volume24h => "volume24hr",
             SortOrder::Volume => "volume",
             SortOrder::Liquidity => "liquidityClob",
             SortOrder::Newest => "startDate",
             SortOrder::Competitive => "competitive",
+        }
+    }
+
+    fn api_limit(self) -> u32 {
+        match self {
+            SortOrder::MonitoringTheSituation => 50,
+            _ => 20,
         }
     }
 
@@ -114,8 +137,9 @@ impl SortOrder {
 
 pub fn build_events_url(topic: Topic, sort: SortOrder) -> String {
     let mut url = format!(
-        "{EVENTS_BASE_URL}?active=true&closed=false&order={}&ascending=false&limit=20",
-        sort.api_param()
+        "{EVENTS_BASE_URL}?active=true&closed=false&order={}&ascending=false&limit={}",
+        sort.api_param(),
+        sort.api_limit()
     );
     if let Some(slug) = topic.tag_slug() {
         url.push_str("&tag_slug=");
@@ -208,8 +232,8 @@ impl FetchState {
             history_updated: false,
             refresh_ms,
             should_stop: false,
-            topic: Topic::All,
-            sort_order: SortOrder::Volume24h,
+            topic: Topic::Geopolitics,
+            sort_order: SortOrder::MonitoringTheSituation,
             filter_changed: false,
         }
     }
@@ -283,6 +307,15 @@ pub fn human_volume(volume: f64) -> String {
     }
 }
 
+fn clickbait_score(event: &Event) -> f64 {
+    let lead_price = event
+        .lead_market()
+        .map(|m| m.yes_price)
+        .unwrap_or(50.0);
+    let competitiveness = 1.0 - (lead_price - 50.0).abs() / 50.0;
+    competitiveness * (1.0 + event.total_volume_24h).ln()
+}
+
 fn fetch_events(
     client: &reqwest::blocking::Client,
     topic: Topic,
@@ -290,7 +323,12 @@ fn fetch_events(
 ) -> Result<Vec<Event>> {
     let url = build_events_url(topic, sort_order);
     let body = client.get(&url).send()?.text()?;
-    parse_events_response(&body)
+    let mut events = parse_events_response(&body)?;
+    if sort_order == SortOrder::MonitoringTheSituation {
+        events.sort_by(|a, b| clickbait_score(b).partial_cmp(&clickbait_score(a)).unwrap_or(std::cmp::Ordering::Equal));
+        events.truncate(20);
+    }
+    Ok(events)
 }
 
 fn fetch_price_history(
