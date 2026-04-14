@@ -120,8 +120,8 @@ fn draw_freq_labels(frame: &mut Frame, area: Rect) {
         return;
     }
 
-    let labels = ["0Hz", "5K", "10K", "15K", "20K"];
-    let max_freq = 22050.0_f32;
+    let labels = ["0Hz", "2K", "4K", "6K", "8K", "10K", "12K"];
+    let max_freq = 12000.0_f32;
 
     let mut spans = Vec::new();
     let mut last_pos = 0usize;
@@ -129,10 +129,12 @@ fn draw_freq_labels(frame: &mut Frame, area: Rect) {
     for label in &labels {
         let freq: f32 = match *label {
             "0Hz" => 0.0,
-            "5K" => 5000.0,
+            "2K" => 2000.0,
+            "4K" => 4000.0,
+            "6K" => 6000.0,
+            "8K" => 8000.0,
             "10K" => 10000.0,
-            "15K" => 15000.0,
-            "20K" => 20000.0,
+            "12K" => 12000.0,
             _ => 0.0,
         };
         let frac = freq / max_freq;

@@ -92,7 +92,7 @@ impl SpectrumAnalyzer {
             return vec![0.0; bar_count];
         }
 
-        let max_freq = (sample_rate / 2) as f32;
+        let max_freq = 12000.0_f32;
 
         (0..bar_count)
             .map(|bar_idx| {
