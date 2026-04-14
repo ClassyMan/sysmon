@@ -7,6 +7,8 @@ pub struct SpectrumAnalyzer {
     pub bins: Vec<f32>,
     pub peak_bins: Vec<f32>,
     decay_rate: f32,
+    floor_db: f32,
+    range_db: f32,
 }
 
 impl SpectrumAnalyzer {
@@ -27,6 +29,8 @@ impl SpectrumAnalyzer {
             bins: vec![0.0; bin_count],
             peak_bins: vec![0.0; bin_count],
             decay_rate: 0.92,
+            floor_db: -80.0,
+            range_db: 50.0,
         }
     }
 
@@ -59,11 +63,27 @@ impl SpectrumAnalyzer {
         let bin_count = self.fft_size / 2;
         let scale = 2.0 / self.fft_size as f32;
 
+        // Convert to dB and find the peak
+        let mut db_values = vec![self.floor_db; bin_count];
+        let mut max_db = self.floor_db;
+
         for idx in 0..bin_count {
             let magnitude = buffer[idx].norm() * scale;
             let db = 20.0 * (magnitude + 1e-10).log10();
-            let normalized = ((db + 60.0) / 60.0).clamp(0.0, 1.0);
-            self.bins[idx] = normalized;
+            db_values[idx] = db;
+            if db > max_db {
+                max_db = db;
+            }
+        }
+
+        // Auto-range: the ceiling follows the peak, floor is ceiling - range_db
+        let ceiling = (max_db + 3.0).max(-10.0);
+        let floor = ceiling - self.range_db;
+
+        for idx in 0..bin_count {
+            let normalized = ((db_values[idx] - floor) / (ceiling - floor)).clamp(0.0, 1.0);
+            // Apply a sqrt curve to boost quieter values visually
+            self.bins[idx] = normalized.sqrt();
         }
 
         for (peak, current) in self.peak_bins.iter_mut().zip(self.bins.iter()) {

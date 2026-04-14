@@ -100,17 +100,25 @@ fn draw_spectrum(frame: &mut Frame, area: Rect, analyzer: &SpectrumAnalyzer, sam
 
 fn bar_color(row_from_bottom: usize, total_height: usize) -> Color {
     if total_height == 0 {
-        return Color::Green;
+        return Color::Rgb(0, 200, 100);
     }
     let frac = row_from_bottom as f32 / total_height as f32;
-    if frac < 0.4 {
-        Color::Rgb(0, 200, 100)
-    } else if frac < 0.65 {
-        Color::Rgb(0, 200, 200)
-    } else if frac < 0.8 {
-        Color::Rgb(200, 100, 255)
+    if frac < 0.25 {
+        // Bottom quarter: deep blue-green
+        let blend = frac / 0.25;
+        Color::Rgb(0, (100.0 + blend * 100.0) as u8, (80.0 + blend * 80.0) as u8)
+    } else if frac < 0.5 {
+        // Lower mid: green to cyan
+        let blend = (frac - 0.25) / 0.25;
+        Color::Rgb(0, 200, (160.0 + blend * 60.0) as u8)
+    } else if frac < 0.75 {
+        // Upper mid: cyan to magenta
+        let blend = (frac - 0.5) / 0.25;
+        Color::Rgb((blend * 220.0) as u8, (220.0 - blend * 120.0) as u8, 255)
     } else {
-        Color::Rgb(255, 60, 120)
+        // Top quarter: magenta to hot pink/white
+        let blend = (frac - 0.75) / 0.25;
+        Color::Rgb(255, (100.0 + blend * 100.0) as u8, (255.0 - blend * 55.0) as u8)
     }
 }
 
