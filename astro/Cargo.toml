@@ -1,0 +1,18 @@
+[package]
+name = "astro"
+version = "0.1.0"
+edition = "2024"
+description = "NASA Astronomy Picture of the Day TUI viewer"
+license = "MIT"
+
+[dependencies]
+sysmon-shared = { path = "../shared" }
+ratatui = "0.30"
+crossterm = "0.29"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+reqwest = { version = "0.12", features = ["blocking"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+artem = "3"

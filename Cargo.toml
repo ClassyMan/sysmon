@@ -1,3 +1,3 @@
 [workspace]
-members = ["shared", "ram", "dio", "net", "gpu", "cpu", "audio", "poly", "sysmon"]
+members = ["shared", "ram", "dio", "net", "gpu", "cpu", "audio", "poly", "astro", "sysmon"]
 resolver = "3"
