@@ -18,6 +18,11 @@ pub enum Panel {
         shared: Arc<Mutex<poly::collector::FetchState>>,
         _fetcher: JoinHandle<()>,
     },
+    Astro {
+        app: astro::app::App,
+        shared: Arc<Mutex<astro::collector::FetchState>>,
+        _fetcher: JoinHandle<()>,
+    },
 }
 
 impl Panel {
@@ -62,6 +67,20 @@ impl Panel {
         }
     }
 
+    pub fn new_astro(api_key: String) -> Self {
+        let shared = Arc::new(Mutex::new(astro::collector::FetchState::new(
+            3_600_000,
+            api_key,
+        )));
+        let fetcher = astro::collector::spawn_fetcher(shared.clone());
+        let app = astro::app::App::new(shared.clone());
+        Panel::Astro {
+            app,
+            shared,
+            _fetcher: fetcher,
+        }
+    }
+
     pub fn tick(&mut self) -> Result<()> {
         match self {
             Panel::Cpu(app) => app.tick(),
@@ -70,6 +89,10 @@ impl Panel {
             Panel::Dio(app) => app.tick(),
             Panel::Net(app) => app.tick(),
             Panel::Poly { app, .. } => {
+                app.tick();
+                Ok(())
+            }
+            Panel::Astro { app, .. } => {
                 app.tick();
                 Ok(())
             }
@@ -84,6 +107,7 @@ impl Panel {
             Panel::Dio(app) => dio::ui::render_in(frame, area, app),
             Panel::Net(app) => net::ui::render_in(frame, area, app),
             Panel::Poly { app, .. } => poly::ui::render_in(frame, area, app),
+            Panel::Astro { app, .. } => astro::ui::render_in(frame, area, app),
         }
     }
 
@@ -97,6 +121,7 @@ impl Panel {
             }
             Panel::Net(app) => app.toggle_fast_mode(),
             Panel::Poly { .. } => {}
+            Panel::Astro { .. } => {}
         }
     }
 
@@ -120,6 +145,14 @@ impl Panel {
                 KeyCode::Char('s') => app.cycle_sort(),
                 _ => {}
             },
+            Panel::Astro { app, .. } => match key.code {
+                KeyCode::Char('j') | KeyCode::Down => app.select_next(),
+                KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
+                KeyCode::Char('v') => app.toggle_view(),
+                KeyCode::Char('J') => app.scroll_down(),
+                KeyCode::Char('K') => app.scroll_up(),
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -132,6 +165,7 @@ impl Panel {
             Panel::Dio(app) => app.refresh_rate,
             Panel::Net(app) => app.refresh_rate(),
             Panel::Poly { .. } => Duration::from_millis(500),
+            Panel::Astro { .. } => Duration::from_millis(500),
         }
     }
 
@@ -143,13 +177,19 @@ impl Panel {
             Panel::Dio(_) => "DIO",
             Panel::Net(_) => "NET",
             Panel::Poly { .. } => "POLY",
+            Panel::Astro { .. } => "ASTRO",
         }
     }
 
     pub fn stop(&mut self) {
-        if let Panel::Poly { shared, .. } = self {
-            let mut state = shared.lock().unwrap();
-            state.should_stop = true;
+        match self {
+            Panel::Poly { shared, .. } => {
+                shared.lock().unwrap().should_stop = true;
+            }
+            Panel::Astro { shared, .. } => {
+                shared.lock().unwrap().should_stop = true;
+            }
+            _ => {}
         }
     }
 }

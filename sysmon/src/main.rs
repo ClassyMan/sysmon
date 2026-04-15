@@ -36,6 +36,8 @@ struct Cli {
     net: bool,
     #[arg(long)]
     poly: bool,
+    #[arg(long)]
+    astro: bool,
 
     /// Refresh interval in milliseconds
     #[arg(short = 'r', long, default_value = "500")]
@@ -72,7 +74,7 @@ fn main() -> Result<()> {
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Result<()> {
-    let any_selected = cli.cpu || cli.gpu || cli.ram || cli.dio || cli.net || cli.poly;
+    let any_selected = cli.cpu || cli.gpu || cli.ram || cli.dio || cli.net || cli.poly || cli.astro;
 
     let mut panels: Vec<Panel> = Vec::new();
 
@@ -97,6 +99,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Resul
     }
     if cli.poly {
         panels.push(Panel::new_poly(30000));
+    }
+    if cli.astro {
+        panels.push(Panel::new_astro("2hDbCHnvukvQdR356ptvqGRJ1C0ud5S5TxUOO4Pr".to_string()));
     }
 
     if panels.is_empty() {
