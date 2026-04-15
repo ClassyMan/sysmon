@@ -16,6 +16,10 @@ const BORDER_COLOR: Color = Color::DarkGray;
 const LABEL_COLOR: Color = Color::Gray;
 
 pub fn render(frame: &mut Frame, app: &App) {
+    render_in(frame, frame.area(), app);
+}
+
+pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -24,7 +28,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Min(8),         // charts
             Constraint::Length(10),     // process table
         ])
-        .split(frame.area());
+        .split(area);
 
     draw_header(frame, outer[0], app);
     draw_gauges(frame, outer[1], app);

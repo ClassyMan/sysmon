@@ -25,6 +25,10 @@ fn price_color(pct: f64) -> Color {
 }
 
 pub fn render(frame: &mut Frame, app: &App) {
+    render_in(frame, frame.area(), app);
+}
+
+pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -32,7 +36,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Percentage(50),
             Constraint::Percentage(50),
         ])
-        .split(frame.area());
+        .split(area);
 
     draw_header(frame, outer[0], app);
     draw_table(frame, outer[1], app);
@@ -40,18 +44,6 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
-    let fast_span = if app.fast_mode {
-        Span::styled(
-            " FAST ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        Span::raw("")
-    };
-
     let status = if let Some(ref err) = app.last_error {
         format!(" {err}")
     } else if let Some(last) = app.last_update {
@@ -81,7 +73,6 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
                 .fg(POLY_COLOR)
                 .add_modifier(Modifier::BOLD),
         ),
-        fast_span,
         topic_span,
         sort_span,
         Span::styled(
@@ -323,17 +314,6 @@ mod tests {
         terminal.draw(|frame| render(frame, &app)).unwrap();
         let output = buffer_to_string(&terminal);
         assert!(output.contains("POLY"), "expected 'POLY' in header, got:\n{output}");
-    }
-
-    #[test]
-    fn test_header_shows_fast_when_active() {
-        let mut app = test_app_empty();
-        app.fast_mode = true;
-        let backend = TestBackend::new(120, 40);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|frame| render(frame, &app)).unwrap();
-        let output = buffer_to_string(&terminal);
-        assert!(output.contains("FAST"), "expected 'FAST' in header, got:\n{output}");
     }
 
     #[test]

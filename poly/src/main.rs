@@ -78,7 +78,6 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, refresh_ms: u64) -
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.should_quit = true;
                     }
-                    KeyCode::Char('f') => app.toggle_fast_mode(),
                     KeyCode::Char('j') | KeyCode::Down => app.select_next(),
                     KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
                     KeyCode::Char('t') | KeyCode::Right => app.cycle_topic(),

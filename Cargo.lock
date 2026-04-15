@@ -2317,6 +2317,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sysmon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cpu",
+ "crossterm",
+ "dio",
+ "gpu",
+ "net",
+ "poly",
+ "ram",
+ "ratatui",
+ "sysmon-shared",
+]
+
+[[package]]
 name = "sysmon-shared"
 version = "0.1.0"
 dependencies = [

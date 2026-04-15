@@ -26,6 +26,10 @@ fn usage_color(pct: f64) -> Color {
 const BAR_FILL: &str = "|";
 
 pub fn render(frame: &mut Frame, app: &App) {
+    render_in(frame, frame.area(), app);
+}
+
+pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
     let core_count = app.core_histories.len();
     let bar_rows = (core_count + 3) / 4; // 4 cores per row
 
@@ -36,7 +40,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Length(bar_rows as u16 + 2),
             Constraint::Min(6),
         ])
-        .split(frame.area());
+        .split(area);
 
     draw_header(frame, outer[0], app);
     draw_core_bars(frame, outer[1], app);
