@@ -10,30 +10,30 @@ pub struct CpuInfo {
 }
 
 pub fn read_cpu_info() -> CpuInfo {
-    let model = fs::read_to_string("/proc/cpuinfo")
-        .unwrap_or_default()
+    let cpuinfo_content = fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let has_hyperthreading = fs::read_to_string("/sys/devices/system/cpu/cpu0/topology/core_cpus_list").is_ok();
+    let max_freq_khz = fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq")
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok());
+
+    parse_cpuinfo(&cpuinfo_content, has_hyperthreading, max_freq_khz)
+}
+
+fn parse_cpuinfo(content: &str, has_hyperthreading: bool, max_freq_khz: Option<f64>) -> CpuInfo {
+    let model = content
         .lines()
         .find(|l| l.starts_with("model name"))
         .and_then(|l| l.split(':').nth(1))
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "Unknown CPU".to_string());
 
-    let threads = fs::read_to_string("/proc/cpuinfo")
-        .unwrap_or_default()
+    let threads = content
         .lines()
         .filter(|l| l.starts_with("processor"))
         .count();
 
-    let cores = fs::read_to_string("/sys/devices/system/cpu/cpu0/topology/core_cpus_list")
-        .ok()
-        .map(|_| threads / 2)
-        .unwrap_or(threads);
-
-    let max_freq_mhz = fs::read_to_string("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq")
-        .ok()
-        .and_then(|s| s.trim().parse::<f64>().ok())
-        .map(|khz| khz / 1000.0)
-        .unwrap_or(0.0);
+    let cores = if has_hyperthreading { threads / 2 } else { threads };
+    let max_freq_mhz = max_freq_khz.map(|khz| khz / 1000.0).unwrap_or(0.0);
 
     CpuInfo { model, cores, threads, max_freq_mhz }
 }
@@ -141,18 +141,21 @@ pub fn read_core_freq_mhz(core_idx: usize) -> Option<f64> {
 pub fn read_load_avg() -> (f64, f64, f64) {
     fs::read_to_string("/proc/loadavg")
         .ok()
-        .and_then(|s| {
-            let fields: Vec<f64> = s.split_whitespace()
-                .take(3)
-                .filter_map(|f| f.parse().ok())
-                .collect();
-            if fields.len() >= 3 {
-                Some((fields[0], fields[1], fields[2]))
-            } else {
-                None
-            }
-        })
+        .and_then(|s| parse_loadavg(&s))
         .unwrap_or((0.0, 0.0, 0.0))
+}
+
+fn parse_loadavg(content: &str) -> Option<(f64, f64, f64)> {
+    let fields: Vec<f64> = content
+        .split_whitespace()
+        .take(3)
+        .filter_map(|f| f.parse().ok())
+        .collect();
+    if fields.len() >= 3 {
+        Some((fields[0], fields[1], fields[2]))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -199,5 +202,137 @@ intr 123456789";
         let times = CpuTimes { user: 100, system: 50, idle: 800, iowait: 50, ..Default::default() };
         assert_eq!(times.total(), 1000);
         assert_eq!(times.busy(), 150);
+    }
+
+    #[test]
+    fn test_usage_pct_zero_total_delta() {
+        let same = CpuTimes { user: 100, idle: 900, ..Default::default() };
+        assert_eq!(usage_pct(&same, &same), 0.0);
+    }
+
+    #[test]
+    fn test_usage_pct_full_load() {
+        let prev = CpuTimes { user: 0, idle: 1000, ..Default::default() };
+        let curr = CpuTimes { user: 1000, idle: 1000, ..Default::default() };
+        let pct = usage_pct(&prev, &curr);
+        assert!((pct - 100.0).abs() < 0.1, "expected ~100%, got {}", pct);
+    }
+
+    #[test]
+    fn test_parse_stat_empty_input() {
+        let snap = parse_stat("").unwrap();
+        assert_eq!(snap.per_core.len(), 0);
+        assert_eq!(snap.total.total(), 0);
+    }
+
+    #[test]
+    fn test_parse_stat_ignores_non_cpu_lines() {
+        let input = "\
+cpu  100 0 50 800 0 0 0 0 0 0
+intr 123456789
+ctxt 987654321
+softirq 111111";
+        let snap = parse_stat(input).unwrap();
+        assert_eq!(snap.per_core.len(), 0);
+        assert_eq!(snap.total.user, 100);
+    }
+
+    #[test]
+    fn test_cpu_times_all_fields_contribute() {
+        let times = CpuTimes {
+            user: 10,
+            nice: 20,
+            system: 30,
+            idle: 40,
+            iowait: 50,
+            irq: 60,
+            softirq: 70,
+            steal: 80,
+        };
+        assert_eq!(times.total(), 360);
+        assert_eq!(times.busy(), 270); // total - idle - iowait = 360 - 40 - 50
+    }
+
+    const PROC_CPUINFO: &str = "\
+processor\t: 0
+vendor_id\t: AuthenticAMD
+model name\t: AMD Ryzen 7 5800X 8-Core Processor
+cpu MHz\t\t: 3800.000
+processor\t: 1
+vendor_id\t: AuthenticAMD
+model name\t: AMD Ryzen 7 5800X 8-Core Processor
+cpu MHz\t\t: 3800.000
+processor\t: 2
+vendor_id\t: AuthenticAMD
+model name\t: AMD Ryzen 7 5800X 8-Core Processor
+cpu MHz\t\t: 3800.000
+processor\t: 3
+vendor_id\t: AuthenticAMD
+model name\t: AMD Ryzen 7 5800X 8-Core Processor
+cpu MHz\t\t: 3800.000";
+
+    #[test]
+    fn test_parse_cpuinfo_model_and_threads() {
+        let info = parse_cpuinfo(PROC_CPUINFO, false, None);
+        assert_eq!(info.model, "AMD Ryzen 7 5800X 8-Core Processor");
+        assert_eq!(info.threads, 4);
+        assert_eq!(info.cores, 4);
+        assert_eq!(info.max_freq_mhz, 0.0);
+    }
+
+    #[test]
+    fn test_parse_cpuinfo_with_hyperthreading() {
+        let info = parse_cpuinfo(PROC_CPUINFO, true, None);
+        assert_eq!(info.threads, 4);
+        assert_eq!(info.cores, 2);
+    }
+
+    #[test]
+    fn test_parse_cpuinfo_with_freq() {
+        let info = parse_cpuinfo(PROC_CPUINFO, false, Some(4500000.0));
+        assert!((info.max_freq_mhz - 4500.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_parse_cpuinfo_empty() {
+        let info = parse_cpuinfo("", false, None);
+        assert_eq!(info.model, "Unknown CPU");
+        assert_eq!(info.threads, 0);
+        assert_eq!(info.cores, 0);
+    }
+
+    #[test]
+    fn test_parse_loadavg_normal() {
+        let result = parse_loadavg("1.50 2.00 1.80 3/1234 56789");
+        assert_eq!(result, Some((1.50, 2.00, 1.80)));
+    }
+
+    #[test]
+    fn test_parse_loadavg_empty() {
+        assert_eq!(parse_loadavg(""), None);
+    }
+
+    #[test]
+    fn test_parse_loadavg_too_few_fields() {
+        assert_eq!(parse_loadavg("1.0 2.0"), None);
+    }
+
+    #[test]
+    fn test_parse_loadavg_with_garbage() {
+        assert_eq!(parse_loadavg("abc def ghi"), None);
+    }
+
+    #[test]
+    fn test_parse_stat_multiple_cores() {
+        let input = "\
+cpu  1000 0 500 8000 0 0 0 0 0 0
+cpu0 250 0 125 2000 0 0 0 0 0 0
+cpu1 250 0 125 2000 0 0 0 0 0 0
+cpu2 250 0 125 2000 0 0 0 0 0 0
+cpu3 250 0 125 2000 0 0 0 0 0 0";
+        let snap = parse_stat(input).unwrap();
+        assert_eq!(snap.per_core.len(), 4);
+        assert_eq!(snap.total.user, 1000);
+        assert_eq!(snap.per_core[2].user, 250);
     }
 }

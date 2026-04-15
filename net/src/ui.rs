@@ -236,3 +236,134 @@ fn auto_scale(observed_max: f64) -> f64 {
         .copied()
         .unwrap_or(padded.ceil())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::collector::NetRates;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(terminal: &Terminal<TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let mut output = String::new();
+        for row in 0..buf.area.height {
+            for col in 0..buf.area.width {
+                let cell = &buf[(col, row)];
+                output.push_str(cell.symbol());
+            }
+            output.push('\n');
+        }
+        output
+    }
+
+    #[test]
+    fn test_auto_scale_zero_returns_default() {
+        assert_eq!(auto_scale(0.0), 1000.0);
+        assert_eq!(auto_scale(-5.0), 1000.0);
+    }
+
+    #[test]
+    fn test_auto_scale_snaps_to_step() {
+        assert_eq!(auto_scale(800.0), 1_000.0);
+        assert_eq!(auto_scale(1500.0), 2_000.0);
+        assert_eq!(auto_scale(3000.0), 5_000.0);
+    }
+
+    #[test]
+    fn test_auto_scale_large_value() {
+        assert_eq!(auto_scale(400_000_000.0), 500_000_000.0);
+    }
+
+    #[test]
+    fn test_auto_scale_beyond_steps_uses_ceil() {
+        let result = auto_scale(2_000_000_000.0);
+        assert!(result > 1_000_000_000.0);
+    }
+
+    #[test]
+    fn test_render_charts_empty_no_panic() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_render_charts_with_data_no_panic() {
+        let mut app = App::with_capacity(100);
+        for rate in [1000.0, 5000.0, 2000.0, 8000.0] {
+            app.rx_history.push(rate);
+            app.tx_history.push(rate * 0.3);
+        }
+        app.rx_y.update(8000.0);
+        app.tx_y.update(2400.0);
+        app.latest_rates = Some(NetRates {
+            rx_bytes_per_sec: 8000.0,
+            tx_bytes_per_sec: 2400.0,
+            rx_packets_per_sec: 50.0,
+            tx_packets_per_sec: 20.0,
+        });
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_header_shows_net() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("NET"), "expected 'NET' in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_header_shows_fast_when_active() {
+        let mut app = App::with_capacity(100);
+        app.fast_mode = true;
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("FAST"), "expected 'FAST' in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_render_rain_mode_no_panic() {
+        let mut app = App::with_capacity(100);
+        app.view_mode = ViewMode::Rain;
+        app.latest_rates = Some(NetRates {
+            rx_bytes_per_sec: 50_000.0,
+            tx_bytes_per_sec: 10_000.0,
+            rx_packets_per_sec: 100.0,
+            tx_packets_per_sec: 40.0,
+        });
+        app.rain.tick(120, 30, 50_000.0, 10_000.0);
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_render_narrow_terminal_no_panic() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(30, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_charts_show_download_upload_labels() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("Download"), "expected 'Download' chart title, got:\n{output}");
+        assert!(output.contains("Upload"), "expected 'Upload' chart title, got:\n{output}");
+    }
+}

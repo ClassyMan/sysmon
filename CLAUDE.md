@@ -25,6 +25,12 @@ cargo test --workspace                       # all tests
 cargo llvm-cov --workspace --summary-only    # coverage
 ```
 
+## Test patterns
+- **UI tests**: `TestBackend::new(120, 40)` + `Terminal::new(backend)`, assert no panic and check `buffer_to_string` for key content
+- **App tests**: `App::with_capacity(n)` constructor in `#[cfg(test)]` bypasses I/O (no `/proc`, no `nvidia-smi`)
+- **Collector tests**: Parsers are extracted from I/O — `parse_cpuinfo()`, `parse_loadavg()`, `filter_and_sort_interfaces()`, `parse_wpctl_inspect()`, etc. Test the parser, not the file read.
+- **No DI**: Collectors are thin I/O wrappers around parsers. Don't add traits/generics to mock file reads — extract the parser instead.
+
 ## Release
 All binaries released together from the monorepo:
 ```bash

@@ -222,3 +222,139 @@ fn draw_processes(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(table, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::collector::{GpuProcess, GpuSnapshot};
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(terminal: &Terminal<TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let mut output = String::new();
+        for row in 0..buf.area.height {
+            for col in 0..buf.area.width {
+                let cell = &buf[(col, row)];
+                output.push_str(cell.symbol());
+            }
+            output.push('\n');
+        }
+        output
+    }
+
+    fn test_snapshot() -> GpuSnapshot {
+        GpuSnapshot {
+            name: "NVIDIA GeForce RTX 3090".to_string(),
+            driver: "590.48.01".to_string(),
+            pcie_gen: "4".to_string(),
+            pcie_width: "16".to_string(),
+            vram_total_mib: 24576.0,
+            vram_used_mib: 4096.0,
+            gpu_util_pct: 45.0,
+            mem_util_pct: 30.0,
+            temp_celsius: 65.0,
+            power_watts: 180.0,
+            power_limit_watts: 350.0,
+            clock_gpu_mhz: 1800.0,
+            clock_mem_mhz: 9501.0,
+            fan_pct: 55.0,
+        }
+    }
+
+    #[test]
+    fn test_render_empty_app_no_panic() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_render_with_snapshot_no_panic() {
+        let mut app = App::with_capacity(100);
+        app.latest = Some(test_snapshot());
+        for value in [20.0, 40.0, 60.0, 80.0] {
+            app.gpu_util_history.push(value);
+            app.mem_util_history.push(value * 0.5);
+            app.temp_history.push(55.0 + value * 0.2);
+            app.power_history.push(100.0 + value);
+        }
+        app.vram_pct_history.push(16.7);
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_header_shows_gpu() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("GPU"), "expected 'GPU' in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_header_shows_fast_when_active() {
+        let mut app = App::with_capacity(100);
+        app.fast_mode = true;
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("FAST"), "expected 'FAST' in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_header_shows_gpu_name_with_snapshot() {
+        let mut app = App::with_capacity(100);
+        app.latest = Some(test_snapshot());
+        let backend = TestBackend::new(160, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("RTX 3090"), "expected GPU name in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_render_with_processes_no_panic() {
+        let mut app = App::with_capacity(100);
+        app.latest = Some(test_snapshot());
+        app.processes = vec![
+            GpuProcess {
+                pid: 1234,
+                name: "Xorg".to_string(),
+                proc_type: "G".to_string(),
+                vram_mib: 512,
+                gpu_pct: Some(15.0),
+                mem_pct: Some(10.0),
+            },
+            GpuProcess {
+                pid: 5678,
+                name: "steam".to_string(),
+                proc_type: "C+G".to_string(),
+                vram_mib: 2048,
+                gpu_pct: None,
+                mem_pct: None,
+            },
+        ];
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("Processes"), "expected 'Processes' table, got:\n{output}");
+    }
+
+    #[test]
+    fn test_render_narrow_terminal_no_panic() {
+        let mut app = App::with_capacity(100);
+        app.latest = Some(test_snapshot());
+        let backend = TestBackend::new(40, 15);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+}

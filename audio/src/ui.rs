@@ -157,3 +157,122 @@ fn draw_freq_labels(frame: &mut Frame, area: Rect) {
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::spectrum::SpectrumAnalyzer;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(terminal: &Terminal<TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let mut output = String::new();
+        for row in 0..buf.area.height {
+            for col in 0..buf.area.width {
+                let cell = &buf[(col, row)];
+                output.push_str(cell.symbol());
+            }
+            output.push('\n');
+        }
+        output
+    }
+
+    #[test]
+    fn test_render_empty_spectrum_no_panic() {
+        let analyzer = SpectrumAnalyzer::new(4096);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &analyzer, 44100, "Test Device"))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_render_with_audio_data_no_panic() {
+        let mut analyzer = SpectrumAnalyzer::new(4096);
+        let samples: Vec<f32> = (0..4096)
+            .map(|idx| (2.0 * std::f32::consts::PI * 440.0 * idx as f32 / 44100.0).sin())
+            .collect();
+        analyzer.process(&samples);
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &analyzer, 44100, "Test Device"))
+            .unwrap();
+    }
+
+    #[test]
+    fn test_header_shows_audio() {
+        let analyzer = SpectrumAnalyzer::new(4096);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &analyzer, 44100, "Test Device"))
+            .unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(
+            output.contains("AUDIO"),
+            "expected 'AUDIO' in header, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_header_shows_device_name() {
+        let analyzer = SpectrumAnalyzer::new(4096);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &analyzer, 44100, "My Sound Card"))
+            .unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(
+            output.contains("My Sound Card"),
+            "expected device name in header, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_header_shows_sample_rate() {
+        let analyzer = SpectrumAnalyzer::new(4096);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &analyzer, 48000, "Test"))
+            .unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(
+            output.contains("48000Hz"),
+            "expected sample rate in header, got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_bar_color_bottom_quarter() {
+        let color = bar_color(0, 20);
+        assert!(matches!(color, Color::Rgb(0, _, _)));
+    }
+
+    #[test]
+    fn test_bar_color_top_quarter() {
+        let color = bar_color(19, 20);
+        assert!(matches!(color, Color::Rgb(255, _, _)));
+    }
+
+    #[test]
+    fn test_bar_color_zero_height() {
+        let color = bar_color(0, 0);
+        assert!(matches!(color, Color::Rgb(0, 200, 100)));
+    }
+
+    #[test]
+    fn test_render_narrow_terminal_no_panic() {
+        let analyzer = SpectrumAnalyzer::new(4096);
+        let backend = TestBackend::new(15, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render(frame, &analyzer, 44100, "Test"))
+            .unwrap();
+    }
+}

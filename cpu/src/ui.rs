@@ -164,3 +164,121 @@ fn draw_total_chart(frame: &mut Frame, area: Rect, app: &App) {
 
     frame.render_widget(chart, area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    fn buffer_to_string(terminal: &Terminal<TestBackend>) -> String {
+        let buf = terminal.backend().buffer();
+        let mut output = String::new();
+        for row in 0..buf.area.height {
+            for col in 0..buf.area.width {
+                let cell = &buf[(col, row)];
+                output.push_str(cell.symbol());
+            }
+            output.push('\n');
+        }
+        output
+    }
+
+    #[test]
+    fn test_usage_color_low() {
+        let color = usage_color(10.0);
+        assert!(matches!(color, Color::Rgb(80, 220, 100)));
+    }
+
+    #[test]
+    fn test_usage_color_medium() {
+        let color = usage_color(45.0);
+        assert!(matches!(color, Color::Rgb(220, 220, 60)));
+    }
+
+    #[test]
+    fn test_usage_color_high() {
+        let color = usage_color(70.0);
+        assert!(matches!(color, Color::Rgb(255, 160, 40)));
+    }
+
+    #[test]
+    fn test_usage_color_critical() {
+        let color = usage_color(95.0);
+        assert!(matches!(color, Color::Rgb(255, 70, 70)));
+    }
+
+    #[test]
+    fn test_render_empty_app_no_panic() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_render_with_data_no_panic() {
+        let mut app = App::with_capacity(100);
+        for value in [10.0, 35.0, 65.0, 90.0] {
+            app.total_history.push(value);
+        }
+        app.core_usages = vec![15.0, 45.0, 75.0, 95.0];
+        app.total_usage = 55.0;
+        app.temp_celsius = Some(62.0);
+        app.load_avg = (1.5, 2.0, 1.8);
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+
+    #[test]
+    fn test_header_shows_cpu() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("CPU"), "expected 'CPU' in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_header_shows_fast_when_active() {
+        let mut app = App::with_capacity(100);
+        app.fast_mode = true;
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("FAST"), "expected 'FAST' in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_header_shows_model_name() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("Test CPU"), "expected model name in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_header_shows_temperature() {
+        let mut app = App::with_capacity(100);
+        app.temp_celsius = Some(72.0);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+        let output = buffer_to_string(&terminal);
+        assert!(output.contains("72°C"), "expected temperature in header, got:\n{output}");
+    }
+
+    #[test]
+    fn test_render_narrow_terminal_no_panic() {
+        let app = App::with_capacity(100);
+        let backend = TestBackend::new(30, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app)).unwrap();
+    }
+}

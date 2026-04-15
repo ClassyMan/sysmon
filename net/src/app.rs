@@ -5,7 +5,7 @@ use crate::rain::RainState;
 use sysmon_shared::ring_buffer::RingBuffer;
 use sysmon_shared::sticky_max::StickyMax;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewMode {
     Charts,
     Rain,
@@ -259,5 +259,67 @@ mod tests {
     fn test_compute_capacity_takes_larger() {
         assert_eq!(compute_capacity(500, 60, 80), 120);
         assert_eq!(compute_capacity(25, 3, 200), 200);
+    }
+
+    #[test]
+    fn test_selected_info_returns_first() {
+        let app = App::with_capacity(100);
+        let info = app.selected_info().unwrap();
+        assert_eq!(info.name, "eth0");
+        assert_eq!(info.speed_mbps, Some(1000));
+    }
+
+    #[test]
+    fn test_toggle_view_charts_to_rain() {
+        let mut app = App::with_capacity(100);
+        assert_eq!(app.view_mode, ViewMode::Charts);
+        app.toggle_view();
+        assert_eq!(app.view_mode, ViewMode::Rain);
+        assert_eq!(app.refresh_ms, RAIN_REFRESH_MS);
+    }
+
+    #[test]
+    fn test_toggle_view_rain_to_charts() {
+        let mut app = App::with_capacity(100);
+        app.toggle_view();
+        app.toggle_view();
+        assert_eq!(app.view_mode, ViewMode::Charts);
+        assert_eq!(app.refresh_ms, 500);
+    }
+
+    #[test]
+    fn test_toggle_view_in_fast_mode_keeps_fast_refresh() {
+        let mut app = App::with_capacity(100);
+        app.toggle_fast_mode();
+        let fast_refresh = app.refresh_ms;
+        app.toggle_view();
+        assert_eq!(app.refresh_ms, fast_refresh);
+    }
+
+    #[test]
+    fn test_next_interface_resets_data() {
+        let mut app = App::with_capacity(100);
+        app.rx_history.push(42.0);
+        app.rx_y.update(42.0);
+        app.next_interface();
+        assert!(app.rx_history.is_empty());
+        assert_eq!(app.rx_y.current(), 0.0);
+        assert!(app.prev_snapshot.is_none());
+    }
+
+    #[test]
+    fn test_chart_capacity() {
+        let app = App::with_capacity(100);
+        assert_eq!(app.chart_capacity(), 100);
+    }
+
+    #[test]
+    fn test_toggle_fast_mode_twice_restores() {
+        let mut app = App::with_capacity(100);
+        app.toggle_fast_mode();
+        app.toggle_fast_mode();
+        assert!(!app.fast_mode);
+        assert_eq!(app.refresh_ms, 500);
+        assert_eq!(app.scrollback_secs, 60);
     }
 }

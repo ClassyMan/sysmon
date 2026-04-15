@@ -200,4 +200,107 @@ mod tests {
         assert_eq!(procs[2].name, "zed-editor");
         assert_eq!(procs[2].gpu_pct, None);
     }
+
+    #[test]
+    fn test_vram_pct_zero_total() {
+        let snap = GpuSnapshot {
+            vram_total_mib: 0.0,
+            vram_used_mib: 100.0,
+            ..parse_gpu_csv(GPU_CSV).unwrap()
+        };
+        assert_eq!(snap.vram_pct(), 0.0);
+    }
+
+    #[test]
+    fn test_power_pct_zero_limit() {
+        let snap = GpuSnapshot {
+            power_limit_watts: 0.0,
+            power_watts: 100.0,
+            ..parse_gpu_csv(GPU_CSV).unwrap()
+        };
+        assert_eq!(snap.power_pct(), 0.0);
+    }
+
+    #[test]
+    fn test_header_line_format() {
+        let snap = parse_gpu_csv(GPU_CSV).unwrap();
+        let header = snap.header_line();
+        assert!(header.contains("NVIDIA GeForce RTX 3090"));
+        assert!(header.contains("PCIe Gen"));
+        assert!(header.contains("°C"));
+        assert!(header.contains("Fan"));
+    }
+
+    #[test]
+    fn test_vram_label_format() {
+        let snap = parse_gpu_csv(GPU_CSV).unwrap();
+        let label = snap.vram_label();
+        assert!(label.contains("VRAM:"));
+        assert!(label.contains("MiB"));
+        assert!(label.contains("%"));
+    }
+
+    #[test]
+    fn test_parse_gpu_csv_insufficient_fields() {
+        let result = parse_gpu_csv("too, few, fields");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_pmon_empty_input() {
+        let procs = parse_pmon("");
+        assert!(procs.is_empty());
+    }
+
+    #[test]
+    fn test_parse_pmon_header_only() {
+        let input = "\
+# gpu         pid   type     fb   ccpm     sm    mem    enc    dec    jpg    ofa    command
+# Idx           #    C/G     MB     MB      %      %      %      %      %      %    name";
+        let procs = parse_pmon(input);
+        assert!(procs.is_empty());
+    }
+
+    #[test]
+    fn test_parse_gpu_csv_bad_numeric_fields_default_to_zero() {
+        let line = "Test GPU, 590.48, 4, 16, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A";
+        let snap = parse_gpu_csv(line).unwrap();
+        assert_eq!(snap.name, "Test GPU");
+        assert_eq!(snap.vram_total_mib, 0.0);
+        assert_eq!(snap.gpu_util_pct, 0.0);
+        assert_eq!(snap.power_watts, 0.0);
+    }
+
+    #[test]
+    fn test_parse_pmon_short_line_skipped() {
+        let input = "0  1234  G  100";
+        let procs = parse_pmon(input);
+        assert!(procs.is_empty());
+    }
+
+    #[test]
+    fn test_vram_label_with_real_data() {
+        let snap = parse_gpu_csv(GPU_CSV).unwrap();
+        let label = snap.vram_label();
+        assert!(label.contains("1481"));
+        assert!(label.contains("24576"));
+    }
+
+    #[test]
+    fn test_header_line_contains_clocks() {
+        let snap = parse_gpu_csv(GPU_CSV).unwrap();
+        let header = snap.header_line();
+        assert!(header.contains("480MHz"), "expected GPU clock in header: {header}");
+        assert!(header.contains("810MHz"), "expected MEM clock in header: {header}");
+    }
+
+    #[test]
+    fn test_power_pct_full_load() {
+        let snap = GpuSnapshot {
+            power_watts: 350.0,
+            power_limit_watts: 350.0,
+            ..parse_gpu_csv(GPU_CSV).unwrap()
+        };
+        assert!((snap.power_pct() - 100.0).abs() < 0.01);
+    }
 }
