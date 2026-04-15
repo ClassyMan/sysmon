@@ -3,21 +3,17 @@ use std::time::Instant;
 
 use crate::collector::{Event, FetchState, SortOrder, SubMarket, Topic};
 
-const FAST_REFRESH_MS: u64 = 5000;
-
 pub struct App {
     pub shared: Arc<Mutex<FetchState>>,
     pub events: Vec<Event>,
     pub selected: usize,
     pub price_history: Vec<(f64, f64)>,
     pub should_quit: bool,
-    pub fast_mode: bool,
     pub refresh_ms: u64,
     pub last_error: Option<String>,
     pub last_update: Option<Instant>,
     pub topic: Topic,
     pub sort_order: SortOrder,
-    normal_refresh_ms: u64,
 }
 
 impl App {
@@ -28,13 +24,11 @@ impl App {
             selected: 0,
             price_history: Vec::new(),
             should_quit: false,
-            fast_mode: false,
             refresh_ms,
             last_error: None,
             last_update: None,
             topic: Topic::Geopolitics,
             sort_order: SortOrder::MonitoringTheSituation,
-            normal_refresh_ms: refresh_ms,
         }
     }
 
@@ -96,17 +90,6 @@ impl App {
             };
             self.request_history_for_selected();
         }
-    }
-
-    pub fn toggle_fast_mode(&mut self) {
-        self.fast_mode = !self.fast_mode;
-        self.refresh_ms = if self.fast_mode {
-            FAST_REFRESH_MS
-        } else {
-            self.normal_refresh_ms
-        };
-        let mut state = self.shared.lock().unwrap();
-        state.refresh_ms = self.refresh_ms;
     }
 
     pub fn cycle_topic(&mut self) {
@@ -204,20 +187,17 @@ mod tests {
             selected: 0,
             price_history: Vec::new(),
             should_quit: false,
-            fast_mode: false,
             refresh_ms: 30000,
             last_error: None,
             last_update: None,
             topic: Topic::Geopolitics,
             sort_order: SortOrder::MonitoringTheSituation,
-            normal_refresh_ms: 30000,
         }
     }
 
     #[test]
     fn test_initial_state() {
         let app = test_app(Vec::new());
-        assert!(!app.fast_mode);
         assert!(!app.should_quit);
         assert!(app.events.is_empty());
         assert_eq!(app.selected, 0);
@@ -265,23 +245,6 @@ mod tests {
         let mut app = test_app(Vec::new());
         app.select_prev();
         assert_eq!(app.selected, 0);
-    }
-
-    #[test]
-    fn test_toggle_fast_mode() {
-        let mut app = test_app(Vec::new());
-        app.toggle_fast_mode();
-        assert!(app.fast_mode);
-        assert_eq!(app.refresh_ms, FAST_REFRESH_MS);
-    }
-
-    #[test]
-    fn test_toggle_fast_mode_twice_restores() {
-        let mut app = test_app(Vec::new());
-        app.toggle_fast_mode();
-        app.toggle_fast_mode();
-        assert!(!app.fast_mode);
-        assert_eq!(app.refresh_ms, 30000);
     }
 
     #[test]

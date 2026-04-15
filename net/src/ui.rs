@@ -14,6 +14,10 @@ const BORDER_COLOR: Color = Color::DarkGray;
 const LABEL_COLOR: Color = Color::Gray;
 
 pub fn render(frame: &mut Frame, app: &App) {
+    render_in(frame, frame.area(), app);
+}
+
+pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -22,7 +26,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Length(3),
             Constraint::Length(3),
         ])
-        .split(frame.area());
+        .split(area);
 
     draw_header(frame, outer[0], app);
     match app.view_mode {

@@ -20,13 +20,17 @@ const BORDER_COLOR: Color = Color::DarkGray;
 const LABEL_COLOR: Color = Color::Gray;
 
 pub fn render(frame: &mut Frame, app: &App) {
+    render_in(frame, frame.area(), app);
+}
+
+pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),
             Constraint::Min(0),
         ])
-        .split(frame.area());
+        .split(area);
 
     draw_header(frame, outer[0], app);
 

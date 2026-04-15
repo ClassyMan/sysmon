@@ -5,13 +5,17 @@ mod process_view;
 pub mod theme;
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Rect};
 
 use crate::app::{App, ViewMode};
 
 pub fn render(frame: &mut Frame, app: &App) {
+    render_in(frame, frame.area(), app);
+}
+
+pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
     let [header_area, main_area] =
-        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(frame.area());
+        Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(area);
 
     header::render(frame, header_area, app);
 

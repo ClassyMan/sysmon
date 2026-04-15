@@ -1,0 +1,23 @@
+[package]
+name = "sysmon"
+version = "0.1.0"
+edition = "2024"
+description = "Compositing dashboard for sysmon monitoring tools"
+license = "MIT"
+
+[[bin]]
+name = "sysmon"
+path = "src/main.rs"
+
+[dependencies]
+sysmon-shared = { path = "../shared" }
+cpu = { path = "../cpu" }
+gpu = { path = "../gpu" }
+ram = { path = "../ram" }
+dio = { path = "../dio" }
+net = { path = "../net" }
+poly = { path = "../poly" }
+ratatui = "0.30"
+crossterm = "0.29"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
