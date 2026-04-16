@@ -13,6 +13,10 @@ description: |
   - astro: NASA Astronomy Picture of the Day viewer
   - sysmon: Compositing dashboard that tiles multiple tools
 
+title: Sysmon Tools
+license: MIT
+contact: https://github.com/ClassyMan/sysmon/issues
+source-code: https://github.com/ClassyMan/sysmon
 grade: stable
 confinement: strict
 base: core24
@@ -22,13 +26,19 @@ platforms:
 
 parts:
   sysmon:
-    plugin: rust
+    plugin: nil
     source: .
-    rust-channel: stable
+    build-snaps:
+      - rustup
     build-packages:
       - pkg-config
-    # Build all workspace binaries
-    rust-features: []
+    override-build: |
+      rustup default stable
+      cargo build --release
+      mkdir -p $CRAFT_PART_INSTALL/bin
+      for bin in cpu gpu ram dio net audio poly astro sysmon; do
+        cp target/release/$bin $CRAFT_PART_INSTALL/bin/
+      done
 
 apps:
   cpu:
