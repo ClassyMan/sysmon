@@ -1,0 +1,89 @@
+name: sysmon-tools
+version: '4.0.0'
+summary: Real-time system monitors with terminal charts
+description: |
+  A collection of TUI monitoring tools built with Rust and ratatui:
+  - cpu: Per-core CPU utilization
+  - gpu: NVIDIA GPU metrics (nvidia-smi)
+  - ram: Memory, swap, PSI pressure
+  - dio: Disk IOPS and latency
+  - net: Network throughput + matrix rain
+  - audio: FFT spectrum analyzer (PipeWire)
+  - poly: Polymarket prediction market dashboard
+  - astro: NASA Astronomy Picture of the Day viewer
+  - sysmon: Compositing dashboard that tiles multiple tools
+
+grade: stable
+confinement: strict
+base: core24
+platforms:
+  amd64:
+    build-on: [amd64]
+
+parts:
+  sysmon:
+    plugin: rust
+    source: .
+    rust-channel: stable
+    build-packages:
+      - pkg-config
+    # Build all workspace binaries
+    rust-features: []
+
+apps:
+  cpu:
+    command: bin/cpu
+    plugs:
+      - system-observe    # /proc/stat, /proc/cpuinfo
+      - hardware-observe  # /sys/class/hwmon (temperatures)
+  gpu:
+    command: bin/gpu
+    plugs:
+      - system-observe
+      - hardware-observe
+    environment:
+      # nvidia-smi lives outside the snap — needs host PATH
+      PATH: /usr/bin:/usr/local/bin:$SNAP/usr/bin:$PATH
+  ram:
+    command: bin/ram
+    plugs:
+      - system-observe    # /proc/meminfo, /proc/vmstat, /proc/pressure
+      - hardware-observe  # /sys/devices (DIMM info)
+      - home              # ~/.cache for hardware info cache
+  dio:
+    command: bin/dio
+    plugs:
+      - system-observe    # /proc/diskstats
+      - hardware-observe  # /sys/block, /sys/class/nvme
+      - process-control   # /proc/*/io for per-process disk I/O
+  net:
+    command: bin/net
+    plugs:
+      - system-observe    # /proc/net/dev
+      - network-observe   # network interface info
+  audio:
+    command: bin/audio
+    plugs:
+      - audio-playback    # PipeWire/PulseAudio access
+      - audio-record      # pw-record capture
+  poly:
+    command: bin/poly
+    plugs:
+      - network           # Polymarket API access
+      - home              # ~/.config for settings
+  astro:
+    command: bin/astro
+    plugs:
+      - network           # NASA APOD API
+      - home              # ~/.cache/sysmon/astro (cache), ~/.config/kitty (theme)
+  sysmon:
+    command: bin/sysmon
+    plugs:
+      - system-observe
+      - hardware-observe
+      - network
+      - network-observe
+      - process-control
+      - audio-playback
+      - audio-record
+      - home
