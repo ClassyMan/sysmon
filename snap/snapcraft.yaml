@@ -16,8 +16,9 @@ description: |
 grade: stable
 confinement: strict
 base: core24
-architectures:
-  - build-on: [amd64]
+platforms:
+  amd64:
+    build-on: [amd64]
 
 parts:
   sysmon:
