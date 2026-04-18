@@ -7,17 +7,18 @@ use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 use crate::app::App;
 use crate::collector::{human_count, human_rate};
 use sysmon_shared::line_chart::{self, LineChart};
+use sysmon_shared::terminal_theme::palette;
 
-const ALLOC_COLOR: Color = Color::Rgb(255, 220, 150);
-const FREE_COLOR: Color = Color::Rgb(180, 120, 255);
-const SWAPIN_COLOR: Color = Color::Rgb(100, 200, 255);
-const SWAPOUT_COLOR: Color = Color::Rgb(255, 130, 130);
-const FAULT_COLOR: Color = Color::Rgb(150, 255, 150);
-const MAJOR_FAULT_COLOR: Color = Color::Rgb(255, 100, 100);
-const PSI_SOME_COLOR: Color = Color::Rgb(255, 200, 100);
-const PSI_FULL_COLOR: Color = Color::Rgb(255, 80, 80);
-const BORDER_COLOR: Color = Color::DarkGray;
-const LABEL_COLOR: Color = Color::Gray;
+fn alloc_color() -> Color { palette().bright_yellow() }
+fn free_color() -> Color { palette().bright_cyan() }
+fn swapin_color() -> Color { palette().bright_red() }
+fn swapout_color() -> Color { palette().bright_red() }
+fn fault_color() -> Color { palette().bright_green() }
+fn major_fault_color() -> Color { palette().bright_red() }
+fn psi_some_color() -> Color { palette().bright_yellow() }
+fn psi_full_color() -> Color { palette().bright_red() }
+fn border_color() -> Color { palette().surface() }
+fn label_color() -> Color { palette().label() }
 
 pub fn render(frame: &mut Frame, app: &App) {
     render_in(frame, frame.area(), app);
@@ -33,6 +34,16 @@ pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
         .split(area);
 
     draw_header(frame, outer[0], app);
+
+    if area.height < 24 {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(outer[1]);
+        draw_row(frame, rows[0], app, RowKind::Ram);
+        draw_row(frame, rows[1], app, RowKind::Psi);
+        return;
+    }
 
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -52,17 +63,17 @@ pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let mode_span = if app.fast_mode {
-        Span::styled(" FAST ", Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Span::styled(" FAST ", Style::default().fg(palette().bg_color()).bg(palette().bright_yellow()).add_modifier(Modifier::BOLD))
     } else {
         Span::raw("")
     };
 
     let text = Paragraph::new(Line::from(vec![
-        Span::styled(" RAM ", Style::default().fg(ALLOC_COLOR).add_modifier(Modifier::BOLD)),
+        Span::styled(" RAM ", Style::default().fg(alloc_color()).add_modifier(Modifier::BOLD)),
         mode_span,
         Span::styled(
             format!(" {} | {}ms | {}s ", app.hardware.summary, app.refresh_ms, app.scrollback_secs),
-            Style::default().fg(LABEL_COLOR),
+            Style::default().fg(label_color()),
         ),
     ]));
     frame.render_widget(text, area);
@@ -113,8 +124,8 @@ fn draw_throughput_chart(frame: &mut Frame, area: Rect, app: &App) {
     let y_max = auto_scale_max(app.throughput_y.current());
 
     render_split_chart(frame, area, app, y_max, |v| human_rate(v),
-        " alloc ", line_chart::Dataset { data: &alloc_data, color: ALLOC_COLOR, name: alloc_label },
-        " free ",  line_chart::Dataset { data: &free_data, color: FREE_COLOR, name: free_label },
+        " alloc ", line_chart::Dataset { data: &alloc_data, color: alloc_color(), name: alloc_label },
+        " free ",  line_chart::Dataset { data: &free_data, color: free_color(), name: free_label },
     );
 }
 
@@ -135,8 +146,8 @@ fn draw_swap_io_chart(frame: &mut Frame, area: Rect, app: &App) {
     let y_max = auto_scale_max(app.swap_io_y.current());
 
     render_split_chart(frame, area, app, y_max, |v| human_rate(v),
-        " swap in ",  line_chart::Dataset { data: &swapin_data, color: SWAPIN_COLOR, name: swapin_label },
-        " swap out ", line_chart::Dataset { data: &swapout_data, color: SWAPOUT_COLOR, name: swapout_label },
+        " swap in ",  line_chart::Dataset { data: &swapin_data, color: swapin_color(), name: swapin_label },
+        " swap out ", line_chart::Dataset { data: &swapout_data, color: swapout_color(), name: swapout_label },
     );
 }
 
@@ -157,8 +168,8 @@ fn draw_faults_chart(frame: &mut Frame, area: Rect, app: &App) {
     let y_max = auto_scale_max(app.faults_y.current());
 
     render_split_chart(frame, area, app, y_max, |v| human_count(v),
-        " minor ", line_chart::Dataset { data: &fault_data, color: FAULT_COLOR, name: fault_label },
-        " major ", line_chart::Dataset { data: &major_data, color: MAJOR_FAULT_COLOR, name: major_label },
+        " minor ", line_chart::Dataset { data: &fault_data, color: fault_color(), name: fault_label },
+        " major ", line_chart::Dataset { data: &major_data, color: major_fault_color(), name: major_label },
     );
 }
 
@@ -179,8 +190,8 @@ fn draw_psi_chart(frame: &mut Frame, area: Rect, app: &App) {
     let y_max = auto_scale_pct(app.psi_y.current());
 
     render_split_chart(frame, area, app, y_max, |v| format!("{:.0}%", v),
-        " some ", line_chart::Dataset { data: &some_data, color: PSI_SOME_COLOR, name: some_label },
-        " full ", line_chart::Dataset { data: &full_data, color: PSI_FULL_COLOR, name: full_label },
+        " some ", line_chart::Dataset { data: &some_data, color: psi_some_color(), name: some_label },
+        " full ", line_chart::Dataset { data: &full_data, color: psi_full_color(), name: full_label },
     );
 }
 
@@ -208,7 +219,7 @@ fn render_split_chart(
             Block::default()
                 .title(left_title)
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(BORDER_COLOR)),
+                .border_style(Style::default().fg(border_color())),
         )
         .x_bounds([0.0, capacity - 1.0])
         .y_bounds([0.0, y_max])
@@ -220,7 +231,7 @@ fn render_split_chart(
             Block::default()
                 .title(right_title)
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(BORDER_COLOR)),
+                .border_style(Style::default().fg(border_color())),
         )
         .x_bounds([0.0, capacity - 1.0])
         .y_bounds([0.0, y_max])
@@ -236,7 +247,7 @@ fn draw_ram_gauge(frame: &mut Frame, area: Rect, app: &App) {
         || (0.0, "RAM: --%".to_string()),
         |info| (info.ram_pct(), info.ram_label()),
     );
-    draw_gauge(frame, area, &label, pct, ALLOC_COLOR);
+    draw_gauge(frame, area, &label, pct, alloc_color());
 }
 
 fn draw_swap_gauge(frame: &mut Frame, area: Rect, app: &App) {
@@ -244,7 +255,7 @@ fn draw_swap_gauge(frame: &mut Frame, area: Rect, app: &App) {
         || (0.0, "SWP: --%".to_string()),
         |info| (info.swap_pct(), info.swap_label()),
     );
-    draw_gauge(frame, area, &label, pct, SWAPIN_COLOR);
+    draw_gauge(frame, area, &label, pct, swapin_color());
 }
 
 fn draw_dirty_gauge(frame: &mut Frame, area: Rect, app: &App) {
@@ -255,7 +266,7 @@ fn draw_dirty_gauge(frame: &mut Frame, area: Rect, app: &App) {
     let dirty_kb = app.latest_info.as_ref().map_or(0, |i| i.dirty_writeback_kb());
     let ram_total = app.latest_info.as_ref().map_or(1, |i| i.ram_total_kb.max(1));
     let pct = (dirty_kb as f64 / ram_total as f64) * 100.0;
-    draw_gauge(frame, area, &label, pct, FAULT_COLOR);
+    draw_gauge(frame, area, &label, pct, fault_color());
 }
 
 fn draw_psi_gauge(frame: &mut Frame, area: Rect, app: &App) {
@@ -264,9 +275,9 @@ fn draw_psi_gauge(frame: &mut Frame, area: Rect, app: &App) {
         |psi| psi.summary_label(),
     );
     let pct = app.latest_psi.as_ref().map_or(0.0, |psi| psi.severity_pct());
-    let color = if pct >= 10.0 { PSI_FULL_COLOR }
-        else if pct >= 1.0 { PSI_SOME_COLOR }
-        else { Color::Green };
+    let color = if pct >= 10.0 { psi_full_color() }
+        else if pct >= 1.0 { psi_some_color() }
+        else { palette().bright_green() };
     draw_gauge(frame, area, &label, pct, color);
 }
 
@@ -275,12 +286,12 @@ fn draw_gauge(frame: &mut Frame, area: Rect, label: &str, pct: f64, color: Color
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(BORDER_COLOR)),
+                .border_style(Style::default().fg(border_color())),
         )
         .gauge_style(Style::default().fg(color).add_modifier(Modifier::BOLD))
         .label(Span::styled(
             label,
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default().fg(palette().fg_color()).add_modifier(Modifier::BOLD),
         ))
         .ratio(pct.clamp(0.0, 100.0) / 100.0);
 

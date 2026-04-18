@@ -1,13 +1,13 @@
 use ratatui::style::{Color, Style};
+use sysmon_shared::terminal_theme::palette;
 
-pub const READ_COLOR: Color = Color::Rgb(180, 120, 255);  // purple
-pub const WRITE_COLOR: Color = Color::Rgb(255, 150, 230); // pink
-pub const HEADER_BG: Color = Color::DarkGray;
-pub const SELECTED_TAB_COLOR: Color = Color::Cyan;
-pub const LABEL_COLOR: Color = Color::Gray;
-pub const BORDER_COLOR: Color = Color::DarkGray;
-pub const HELP_BORDER_COLOR: Color = Color::Cyan;
+pub fn read_color() -> Color { palette().bright_cyan() }
+pub fn write_color() -> Color { palette().bright_red() }
+pub fn selected_tab_color() -> Color { palette().bright_cyan() }
+pub fn label_color() -> Color { palette().label() }
+pub fn border_color() -> Color { palette().surface() }
+pub fn help_border_color() -> Color { palette().bright_cyan() }
 
 pub fn border_style() -> Style {
-    Style::default().fg(BORDER_COLOR)
+    Style::default().fg(border_color())
 }

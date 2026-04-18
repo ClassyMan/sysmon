@@ -1,16 +1,18 @@
 # sysmon
 
-Cargo workspace with 8 real-time monitors (Rust + ratatui).
+Cargo workspace with 8 real-time monitors plus a compositor (Rust + ratatui).
 
 ## Crates
 - `shared/` — line_chart, ring_buffer, sticky_max (shared library)
 - `cpu/` — per-core CPU utilization
-- `gpu/` — NVIDIA GPU (nvidia-smi)
+- `gpu/` — NVIDIA GPU (nvml-wrapper, not nvidia-smi — works in strict snap confinement)
 - `ram/` — memory, swap, page faults, PSI
 - `dio/` — disk IOPS and latency
 - `net/` — network throughput + matrix rain mode
-- `audio/` — FFT spectrum analyzer (PipeWire)
+- `audio/` — FFT spectrum analyzer (libpipewire direct)
 - `poly/` — Polymarket prediction market dashboard (Gamma + CLOB APIs)
+- `astro/` — NASA Astronomy Picture of the Day TUI viewer
+- `sysmon/` — compositor binary: `sysmon --cpu --gpu --audio ...` tiles multiple tools in one window
 
 ## Build & install
 ```bash
@@ -61,4 +63,47 @@ gh release create vX.Y.Z target/release/cpu target/release/gpu target/release/ra
 - No auth needed — read-only public endpoints
 - Background thread handles HTTP; main thread never blocks on network
 - Default 30s refresh, fast mode 5s — Gamma rate limit is 500/10s so both are safe
-- Uses `reqwest` blocking + `serde` (only crate in workspace with HTTP deps)
+- Uses `reqwest` blocking + `serde`
+
+## audio-specific notes
+- Uses libpipewire directly via `pipewire` + `libspa` crates (not `pw-record` — subprocess binary isn't in snap)
+- Build deps: `clang` + `libclang-dev` for bindgen; snap stage-packages include `libpipewire-0.3-0` + `libspa-0.2-modules`
+- Snap env vars: `SPA_PLUGIN_DIR=$SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/spa-0.2`, `PIPEWIRE_MODULE_DIR=$SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/pipewire-0.3`
+- Capture props: `MEDIA_CATEGORY=Capture` + `STREAM_CAPTURE_SINK=true` + `AUTOCONNECT` flag. **Do NOT set `MEDIA_ROLE`** — it silently breaks WirePlumber auto-routing to the default sink monitor
+- In `.process()` callback, always slice by `data.chunk().size()` and `.offset()`, NEVER `data.data().len()` — the mmap'd buffer is much larger than the valid chunk, reading the full slice feeds the FFT zeroed memory
+- Audio crate is lib+bin (like other tools) so `sysmon --audio` composites it alongside cpu/gpu/etc
+
+## Debugging audio in snap
+- `pw-link -l | grep sysmon-audio` — should show `<sink>:monitor_FL -> sysmon-audio:input_FL`. Empty = routing broken
+- `pw-cli ls Node | grep -B1 -A25 sysmon-audio` — confirms `stream.capture.sink=true` reached the server
+- UI header shows `<state> | <rate>Hz | buf=N peak=X.XXXX` for live diagnosis — peak=0 with active audio means we're linked to nothing / dummy
+- TUI rule: thread errors go into `Arc<Mutex<Option<String>>>` and render in the header — `eprintln!` is invisible under the alternate screen
+
+## astro-specific notes
+- Fetches from NASA APOD API (public, key-authenticated)
+- Uses `reqwest` blocking + `rustls-tls` + `serde`
+- Background thread handles HTTP; client constructed on main thread (tokio DNS resolver fix)
+- Cache in `XDG_CACHE_HOME/sysmon/astro/` (snap-aware, falls back to `SNAP_USER_COMMON/.cache`)
+- Theme detection reads kitty config via `XDG_CONFIG_HOME` (snap-aware)
+
+## Terminal theme detection
+- `shared/src/terminal_theme.rs` resolves a 16-color palette at startup via `init()`
+- Detection order: ghostty config (`~/.config/ghostty/config` + theme file) → kitty config (with include chain) → OSC 11/10/4 query → Catppuccin Mocha default
+- Env-based terminal detection: `TERM_PROGRAM=ghostty` / `GHOSTTY_RESOURCES_DIR` for ghostty; `KITTY_WINDOW_ID` / `TERM=xterm-kitty` for kitty
+- OSC 4 is unreliable in ghostty (partial slot responses leak defaults) — config parse is mandatory
+- `Palette.colors` is 16 slots — `.green()` returns slot 2 (muted), `.bright_green()` returns slot 10 (vibrant). Same split for all ANSI colors
+- Chart lines and accent UI use the **bright** variants (`bright_green`, `bright_yellow`, `bright_red`, `bright_cyan`) so they pop on dark backgrounds. `surface()`/`label()` stay muted for structural borders and axis labels
+- **Theme-fit caveat**: in Alien Blood, `bright_magenta` = `#0058e0` and `bright_blue` = `#00aae0` — both blue. Avoid them if you want to stay inside the green/teal/yellow/orange palette; route through `bright_cyan` (teal) instead
+- All tool UIs read via `palette().bright_green()`, `.bright_red()`, etc. — NO hardcoded `Color::White / Yellow / Black / DarkGray` anywhere except `#[cfg(test)]` fixtures and one-off vivid colors that palette can't provide (e.g. audio peak marker uses `Color::Rgb(0xff, 0x55, 0x55)` because Alien Blood's reds are all muted/orange)
+- The `sysmon` compositor embeds every tool as a library, so rebuilding standalone tools isn't enough — always rebuild+reinstall `sysmon` too
+
+## Snap packaging
+```bash
+./snap-dev.sh              # build + install + run astro
+./snap-dev.sh <app>        # build + install + run specific app
+./snap-dev.sh --install    # skip cargo, just re-snap + install
+```
+- Uses `snapcraft pack --destructive-mode` (avoids LXD issues)
+- Strict confinement: `home` plug can't access dotfiles — use `XDG_*` / `SNAP_*` env vars
+- HTTP crates must use `http1_only()` — HTTP/2 ALPN negotiation fails in snap sandbox
+- Always set a `user_agent()` — NASA API rejects default UA from snap

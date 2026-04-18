@@ -6,14 +6,15 @@ use ratatui::widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table};
 
 use crate::app::App;
 use sysmon_shared::line_chart::{self, LineChart};
+use sysmon_shared::terminal_theme::palette;
 
-const GPU_COLOR: Color = Color::Rgb(120, 255, 180);
-const MEM_COLOR: Color = Color::Rgb(100, 200, 255);
-const TEMP_COLOR: Color = Color::Rgb(255, 140, 100);
-const POWER_COLOR: Color = Color::Rgb(255, 220, 100);
-const VRAM_COLOR: Color = Color::Rgb(180, 120, 255);
-const BORDER_COLOR: Color = Color::DarkGray;
-const LABEL_COLOR: Color = Color::Gray;
+fn gpu_color() -> Color { palette().bright_green() }
+fn mem_color() -> Color { palette().bright_cyan() }
+fn temp_color() -> Color { palette().lerp(11, 9, 0.5) }
+fn power_color() -> Color { palette().bright_yellow() }
+fn vram_color() -> Color { palette().bright_cyan() }
+fn border_color() -> Color { palette().surface() }
+fn label_color() -> Color { palette().label() }
 
 pub fn render(frame: &mut Frame, app: &App) {
     render_in(frame, frame.area(), app);
@@ -24,21 +25,34 @@ pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),      // header
-            Constraint::Length(3),      // VRAM + power gauges
-            Constraint::Min(8),         // charts
-            Constraint::Length(10),     // process table
+            Constraint::Min(0),         // body
         ])
         .split(area);
 
     draw_header(frame, outer[0], app);
-    draw_gauges(frame, outer[1], app);
-    draw_charts(frame, outer[2], app);
-    draw_processes(frame, outer[3], app);
+
+    let [body_left, body_right] = Layout::horizontal([
+        Constraint::Ratio(2, 3),
+        Constraint::Ratio(1, 3),
+    ])
+    .areas(outer[1]);
+
+    let left = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),  // gauges
+            Constraint::Min(8),     // charts
+        ])
+        .split(body_left);
+
+    draw_gauges(frame, left[0], app);
+    draw_charts(frame, left[1], app);
+    draw_processes(frame, body_right, app);
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let fast_span = if app.fast_mode {
-        Span::styled(" FAST ", Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Span::styled(" FAST ", Style::default().fg(palette().bg_color()).bg(palette().bright_yellow()).add_modifier(Modifier::BOLD))
     } else {
         Span::raw("")
     };
@@ -49,11 +63,11 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     );
 
     let text = Paragraph::new(Line::from(vec![
-        Span::styled(" GPU ", Style::default().fg(GPU_COLOR).add_modifier(Modifier::BOLD)),
+        Span::styled(" GPU ", Style::default().fg(gpu_color()).add_modifier(Modifier::BOLD)),
         fast_span,
         Span::styled(
             format!(" {} | {}ms ", hw_info, app.refresh_ms),
-            Style::default().fg(LABEL_COLOR),
+            Style::default().fg(label_color()),
         ),
     ]));
     frame.render_widget(text, area);
@@ -71,9 +85,9 @@ fn draw_gauges(frame: &mut Frame, area: Rect, app: &App) {
     );
 
     let vram_gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BORDER_COLOR)))
-        .gauge_style(Style::default().fg(VRAM_COLOR).add_modifier(Modifier::BOLD))
-        .label(Span::styled(&vram_label, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(border_color())))
+        .gauge_style(Style::default().fg(vram_color()).add_modifier(Modifier::BOLD))
+        .label(Span::styled(&vram_label, Style::default().fg(palette().fg_color()).add_modifier(Modifier::BOLD)))
         .ratio(vram_pct.clamp(0.0, 100.0) / 100.0);
     frame.render_widget(vram_gauge, vram_area);
 
@@ -84,9 +98,9 @@ fn draw_gauges(frame: &mut Frame, area: Rect, app: &App) {
     );
 
     let power_gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BORDER_COLOR)))
-        .gauge_style(Style::default().fg(POWER_COLOR).add_modifier(Modifier::BOLD))
-        .label(Span::styled(&power_label, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(border_color())))
+        .gauge_style(Style::default().fg(power_color()).add_modifier(Modifier::BOLD))
+        .label(Span::styled(&power_label, Style::default().fg(palette().fg_color()).add_modifier(Modifier::BOLD)))
         .ratio(power_pct.clamp(0.0, 100.0) / 100.0);
     frame.render_widget(power_gauge, power_area);
 }
@@ -114,7 +128,7 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
         || "GPU: --%".to_string(),
         |s| format!("GPU: {:.0}%", s.gpu_util_pct),
     );
-    render_chart(frame, gpu_area, " GPU Utilization ", &gpu_data, GPU_COLOR,
+    render_chart(frame, gpu_area, " GPU Utilization ", &gpu_data, gpu_color(),
         &gpu_label, capacity, 100.0, &x_labels, "100%");
 
     // Memory bandwidth utilization
@@ -124,7 +138,7 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
         || "MEM: --%".to_string(),
         |s| format!("MEM: {:.0}%", s.mem_util_pct),
     );
-    render_chart(frame, mem_area, " Memory Bus ", &mem_data, MEM_COLOR,
+    render_chart(frame, mem_area, " Memory Bus ", &mem_data, mem_color(),
         &mem_label, capacity, 100.0, &x_labels, "100%");
 
     // Temperature
@@ -134,7 +148,7 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
         || "Temp: --".to_string(),
         |s| format!("Temp: {:.0}°C", s.temp_celsius),
     );
-    render_chart(frame, temp_area, " Temperature ", &temp_data, TEMP_COLOR,
+    render_chart(frame, temp_area, " Temperature ", &temp_data, temp_color(),
         &temp_label, capacity, 100.0, &x_labels, "100°C");
 
     // Power
@@ -145,7 +159,7 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
         || "Power: --".to_string(),
         |s| format!("Power: {:.0}W", s.power_watts),
     );
-    render_chart(frame, power_area, " Power Draw ", &power_data, POWER_COLOR,
+    render_chart(frame, power_area, " Power Draw ", &power_data, power_color(),
         &power_label, capacity, power_max, &x_labels, &format!("{:.0}W", power_max));
 }
 
@@ -170,7 +184,7 @@ fn render_chart(
         Block::default()
             .title(title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(BORDER_COLOR)),
+            .border_style(Style::default().fg(border_color())),
     )
     .x_bounds([0.0, capacity - 1.0])
     .y_bounds([0.0, y_max])
@@ -183,7 +197,7 @@ fn render_chart(
 fn draw_processes(frame: &mut Frame, area: Rect, app: &App) {
     let header_cells = ["PID", "TYPE", "GPU%", "MEM%", "VRAM", "Command"]
         .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(GPU_COLOR).add_modifier(Modifier::BOLD)));
+        .map(|h| Cell::from(*h).style(Style::default().fg(gpu_color()).add_modifier(Modifier::BOLD)));
     let header = Row::new(header_cells).height(1);
 
     let rows = app.processes.iter().map(|proc| {
@@ -199,7 +213,7 @@ fn draw_processes(frame: &mut Frame, area: Rect, app: &App) {
             Cell::from(vram_str),
             Cell::from(proc.name.clone()),
         ])
-        .style(Style::default().fg(LABEL_COLOR))
+        .style(Style::default().fg(label_color()))
     });
 
     let widths = [
@@ -217,7 +231,7 @@ fn draw_processes(frame: &mut Frame, area: Rect, app: &App) {
             Block::default()
                 .title(" Processes ")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(BORDER_COLOR)),
+                .border_style(Style::default().fg(border_color())),
         );
 
     frame.render_widget(table, area);

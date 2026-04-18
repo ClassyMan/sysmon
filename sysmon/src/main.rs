@@ -11,7 +11,7 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::backend::CrosstermBackend;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
 use ratatui::Terminal;
 
@@ -38,6 +38,8 @@ struct Cli {
     poly: bool,
     #[arg(long)]
     astro: bool,
+    #[arg(long)]
+    audio: bool,
 
     /// Refresh interval in milliseconds
     #[arg(short = 'r', long, default_value = "500")]
@@ -52,6 +54,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     terminal::enable_raw_mode()?;
+    sysmon_shared::terminal_theme::init();
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
@@ -74,7 +77,7 @@ fn main() -> Result<()> {
 }
 
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Result<()> {
-    let any_selected = cli.cpu || cli.gpu || cli.ram || cli.dio || cli.net || cli.poly || cli.astro;
+    let any_selected = cli.cpu || cli.gpu || cli.ram || cli.dio || cli.net || cli.poly || cli.astro || cli.audio;
 
     let mut panels: Vec<Panel> = Vec::new();
 
@@ -103,6 +106,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Resul
     if cli.astro {
         panels.push(Panel::new_astro("2hDbCHnvukvQdR356ptvqGRJ1C0ud5S5TxUOO4Pr".to_string()));
     }
+    if cli.audio {
+        panels.push(Panel::new_audio()?);
+    }
 
     if panels.is_empty() {
         return Ok(());
@@ -114,8 +120,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Resul
         .position(|p| matches!(p, Panel::Poly { .. }))
         .unwrap_or(0);
 
-    let focus_color = Color::Rgb(120, 200, 255);
-    let unfocused_color = Color::DarkGray;
+    let focus_color = sysmon_shared::terminal_theme::palette().bright_cyan();
+    let unfocused_color = sysmon_shared::terminal_theme::palette().surface();
 
     loop {
         terminal.draw(|frame| {

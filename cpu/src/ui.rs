@@ -6,20 +6,22 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::App;
 use sysmon_shared::line_chart::{self, LineChart};
+use sysmon_shared::terminal_theme::palette;
 
-const BORDER_COLOR: Color = Color::DarkGray;
-const LABEL_COLOR: Color = Color::Gray;
-const TOTAL_COLOR: Color = Color::Rgb(120, 255, 180);
+fn border_color() -> Color { palette().surface() }
+fn label_color() -> Color { palette().label() }
+fn total_color() -> Color { palette().bright_green() }
 
 fn usage_color(pct: f64) -> Color {
+    let p = palette();
     if pct < 30.0 {
-        Color::Rgb(80, 220, 100)
+        p.bright_green()
     } else if pct < 60.0 {
-        Color::Rgb(220, 220, 60)
+        p.bright_yellow()
     } else if pct < 85.0 {
-        Color::Rgb(255, 160, 40)
+        p.lerp(11, 9, 0.5) // bright yellow→orange midpoint
     } else {
-        Color::Rgb(255, 70, 70)
+        p.bright_red()
     }
 }
 
@@ -49,7 +51,7 @@ pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let fast_span = if app.fast_mode {
-        Span::styled(" FAST ", Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Span::styled(" FAST ", Style::default().fg(palette().bg_color()).bg(palette().bright_yellow()).add_modifier(Modifier::BOLD))
     } else {
         Span::raw("")
     };
@@ -63,7 +65,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let load = app.load_avg;
 
     let text = Paragraph::new(Line::from(vec![
-        Span::styled(" CPU ", Style::default().fg(TOTAL_COLOR).add_modifier(Modifier::BOLD)),
+        Span::styled(" CPU ", Style::default().fg(total_color()).add_modifier(Modifier::BOLD)),
         fast_span,
         Span::styled(
             format!(
@@ -76,7 +78,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
                 load.0, load.1, load.2,
                 app.refresh_ms,
             ),
-            Style::default().fg(LABEL_COLOR),
+            Style::default().fg(label_color()),
         ),
     ]));
     frame.render_widget(text, area);
@@ -85,7 +87,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_core_bars(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(BORDER_COLOR));
+        .border_style(Style::default().fg(border_color()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -93,10 +95,9 @@ fn draw_core_bars(frame: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let core_count = app.core_usages.len();
     let cols = 4usize;
     let col_width = inner.width as usize / cols;
-    let bar_width = col_width.saturating_sub(10); // "XX[████] NNN% "
+    let bar_width = col_width.saturating_sub(11); // "XX[████]NNN.N% " → 11 chars fixed
 
     let buf = frame.buffer_mut();
 
@@ -114,7 +115,7 @@ fn draw_core_bars(frame: &mut Frame, area: Rect, app: &App) {
 
         // Core label: "0["
         let label = format!("{:>2}[", idx);
-        buf.set_string(x_start, row, &label, Style::default().fg(LABEL_COLOR));
+        buf.set_string(x_start, row, &label, Style::default().fg(label_color()));
 
         // Bar fill with pipe characters
         let bar_x = x_start + label.len() as u16;
@@ -124,17 +125,17 @@ fn draw_core_bars(frame: &mut Frame, area: Rect, app: &App) {
             if bx < filled {
                 buf.set_string(bar_x + bx as u16, row, BAR_FILL, Style::default().fg(color));
             } else {
-                buf.set_string(bar_x + bx as u16, row, " ", Style::default().fg(Color::Rgb(40, 40, 40)));
+                buf.set_string(bar_x + bx as u16, row, " ", Style::default().fg(palette().mix_with_bg(0, 0.5)));
             }
         }
 
         // Closing bracket and percentage
-        let suffix = format!("]{:>5.1}%", usage);
+        let suffix = format!("]{:>5.1}% ", usage);
         buf.set_string(
             bar_x + bar_width as u16,
             row,
             &suffix,
-            Style::default().fg(LABEL_COLOR),
+            Style::default().fg(label_color()),
         );
     }
 }
@@ -148,14 +149,14 @@ fn draw_total_chart(frame: &mut Frame, area: Rect, app: &App) {
 
     let chart = LineChart::new(vec![line_chart::Dataset {
         data: &total_data,
-        color: TOTAL_COLOR,
+        color: total_color(),
         name: label,
     }])
     .block(
         Block::default()
             .title(" Total Utilization ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(BORDER_COLOR)),
+            .border_style(Style::default().fg(border_color())),
     )
     .x_bounds([0.0, capacity - 1.0])
     .y_bounds([0.0, 100.0])
@@ -185,27 +186,23 @@ mod tests {
     }
 
     #[test]
-    fn test_usage_color_low() {
-        let color = usage_color(10.0);
-        assert!(matches!(color, Color::Rgb(80, 220, 100)));
+    fn test_usage_color_low_is_green() {
+        assert_eq!(usage_color(10.0), palette().bright_green());
     }
 
     #[test]
-    fn test_usage_color_medium() {
-        let color = usage_color(45.0);
-        assert!(matches!(color, Color::Rgb(220, 220, 60)));
+    fn test_usage_color_medium_is_yellow() {
+        assert_eq!(usage_color(45.0), palette().bright_yellow());
     }
 
     #[test]
-    fn test_usage_color_high() {
-        let color = usage_color(70.0);
-        assert!(matches!(color, Color::Rgb(255, 160, 40)));
+    fn test_usage_color_high_is_orange() {
+        assert_eq!(usage_color(70.0), palette().lerp(11, 9, 0.5));
     }
 
     #[test]
-    fn test_usage_color_critical() {
-        let color = usage_color(95.0);
-        assert!(matches!(color, Color::Rgb(255, 70, 70)));
+    fn test_usage_color_critical_is_red() {
+        assert_eq!(usage_color(95.0), palette().bright_red());
     }
 
     #[test]
