@@ -106,7 +106,13 @@ fn find_ghostty_theme(name: &str) -> Option<String> {
 }
 
 fn parse_ghostty_theme(text: &str) -> Option<Palette> {
+    // Same init strategy as parse_kitty_config: zero the brights so
+    // synthesis can fill unset ones, keep Catppuccin basics/bg/fg as
+    // fallbacks.
     let mut palette = Palette::default();
+    for i in 8..16 {
+        palette.colors[i] = [0, 0, 0];
+    }
     let mut slots_set = 0;
 
     for line in text.lines() {
@@ -133,7 +139,12 @@ fn parse_ghostty_theme(text: &str) -> Option<Palette> {
         }
     }
 
-    if slots_set >= 6 { Some(palette) } else { None }
+    if slots_set >= 6 {
+        palette.synthesize_brights();
+        Some(palette)
+    } else {
+        None
+    }
 }
 
 fn load_kitty_palette() -> Option<Palette> {
@@ -142,7 +153,13 @@ fn load_kitty_palette() -> Option<Palette> {
 }
 
 fn parse_kitty_config(path: &Path) -> Option<Palette> {
+    // Zero the brights up front so `synthesize_brights()` can fill in any
+    // the theme leaves unset. Keep Catppuccin bg/fg/basics so partial
+    // themes still get reasonable fallbacks for slots they don't touch.
     let mut palette = Palette::default();
+    for i in 8..16 {
+        palette.colors[i] = [0, 0, 0];
+    }
     let mut slots_set = 0;
     let mut visited: Vec<PathBuf> = Vec::new();
     let mut stack: Vec<PathBuf> = vec![path.to_path_buf()];
@@ -193,7 +210,12 @@ fn parse_kitty_config(path: &Path) -> Option<Palette> {
         }
     }
 
-    if slots_set >= 6 { Some(palette) } else { None }
+    if slots_set >= 6 {
+        palette.synthesize_brights();
+        Some(palette)
+    } else {
+        None
+    }
 }
 
 fn expand_kitty_path(raw: &str, base_dir: &Path) -> PathBuf {
@@ -279,12 +301,84 @@ impl Palette {
     pub fn mix_with_fg(&self, slot: usize, t: f64) -> Color {
         lerp_rgb(self.fg, self.colors[slot.min(15)], t)
     }
+
+    /// Relative luminance of the background (0.0..=1.0, Rec.709 linear).
+    pub fn bg_luminance(&self) -> f64 {
+        rgb_luminance(self.bg)
+    }
+
+    /// True when the background is darker than the midline. Used to decide
+    /// which direction to lift or darken synthesized bright slots.
+    pub fn is_dark(&self) -> bool {
+        self.bg_luminance() < 0.5
+    }
+
+    /// WCAG-style contrast ratio between two sRGB triples, clamped to
+    /// [1.0, 21.0]. Provided as a utility; no current consumer uses it.
+    pub fn contrast_ratio(&self, fg: [u8; 3], bg: [u8; 3]) -> f64 {
+        let l1 = rgb_luminance(fg);
+        let l2 = rgb_luminance(bg);
+        let (hi, lo) = if l1 > l2 { (l1, l2) } else { (l2, l1) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    /// True when all 8 bright slots are [0,0,0]. Diagnostic utility —
+    /// `synthesize_brights` decides per-slot rather than relying on this,
+    /// so production code doesn't call it. Tests use it to lock in the
+    /// invariant that Alien Blood and Catppuccin default both have
+    /// populated brights.
+    #[cfg(test)]
+    fn brights_uninitialized(&self) -> bool {
+        self.colors[8..16].iter().all(|c| *c == [0, 0, 0])
+    }
+
+    /// Fill bright slots that are still [0,0,0] by lightening (dark bg) or
+    /// darkening (light bg) the corresponding basic. This is a plausibility
+    /// fallback — it does not reconstruct what the theme author intended.
+    /// Per-slot: slots already set to non-zero values are left alone, so
+    /// this is safely a no-op on a fully populated palette (Alien Blood,
+    /// Catppuccin default). Accepts the trade that a theme legitimately
+    /// setting a bright slot to pure black would be overwritten; no known
+    /// terminal theme does so.
+    fn synthesize_brights(&mut self) {
+        let dark = self.is_dark();
+        let anchor: [u8; 3] = if dark { [255, 255, 255] } else { [0, 0, 0] };
+        let t = if dark { 0.35 } else { 0.20 };
+        // Slot 8 (bright surface) follows fg rather than the anchor so
+        // "bright gray" tracks the theme's text color.
+        if self.colors[8] == [0, 0, 0] {
+            self.colors[8] = lerp_rgb_raw(self.colors[0], self.fg, 0.30);
+        }
+        for i in 1..=7 {
+            if self.colors[8 + i] == [0, 0, 0] {
+                self.colors[8 + i] = lerp_rgb_raw(self.colors[i], anchor, t);
+            }
+        }
+    }
+}
+
+fn lerp_rgb_raw(a: [u8; 3], b: [u8; 3], t: f64) -> [u8; 3] {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| ((x as f64) * (1.0 - t) + (y as f64) * t) as u8;
+    [mix(a[0], b[0]), mix(a[1], b[1]), mix(a[2], b[2])]
 }
 
 fn lerp_rgb(a: [u8; 3], b: [u8; 3], t: f64) -> Color {
-    let t = t.clamp(0.0, 1.0);
-    let mix = |x: u8, y: u8| ((x as f64) * (1.0 - t) + (y as f64) * t) as u8;
-    Color::Rgb(mix(a[0], b[0]), mix(a[1], b[1]), mix(a[2], b[2]))
+    let [r, g, b_] = lerp_rgb_raw(a, b, t);
+    Color::Rgb(r, g, b_)
+}
+
+/// Relative luminance of an sRGB triple using Rec.709 coefficients,
+/// not gamma-corrected. 0.0 = black, 1.0 = white.
+///
+/// Linear (not sRGB) because sysmon only needs a coarse dark/light signal;
+/// the two disagree by a few percent near the midline and not at all at the
+/// extremes.
+pub fn rgb_luminance(rgb: [u8; 3]) -> f64 {
+    let r = rgb[0] as f64 / 255.0;
+    let g = rgb[1] as f64 / 255.0;
+    let b = rgb[2] as f64 / 255.0;
+    0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
 impl Default for Palette {
@@ -576,5 +670,297 @@ color6 #777777
         assert_eq!(palette.bg, [0, 0, 0]);
         assert_eq!(palette.colors[5], [0x66, 0x66, 0x66]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // ---------------------------------------------------------------
+    // Alien Blood ground-truth lock-in
+    //
+    // The user's kitty runs Alien Blood inline in `~/.config/kitty/kitty.conf`
+    // and the resulting rendering across every sysmon tool is approved as
+    // correct. The fixtures and tests below freeze that output: any future
+    // change that moves a single RGB byte will fail one of these tests.
+    // ---------------------------------------------------------------
+
+    const ALIEN_BLOOD_KITTY_CONF: &str = "\
+color0 #112615
+color1 #7f2b26
+color2 #2f7e25
+color3 #707f23
+color4 #2f697f
+color5 #47577e
+color6 #317f76
+color7 #647d75
+color8 #3c4711
+color9 #df8008
+color10 #18e000
+color11 #bde000
+color12 #00a9df
+color13 #0058df
+color14 #00dfc3
+color15 #73f990
+background #0f160f
+foreground #637d75
+";
+
+    fn alien_blood_palette() -> Palette {
+        Palette {
+            bg: [0x0f, 0x16, 0x0f],
+            fg: [0x63, 0x7d, 0x75],
+            colors: [
+                [0x11, 0x26, 0x15],
+                [0x7f, 0x2b, 0x26],
+                [0x2f, 0x7e, 0x25],
+                [0x70, 0x7f, 0x23],
+                [0x2f, 0x69, 0x7f],
+                [0x47, 0x57, 0x7e],
+                [0x31, 0x7f, 0x76],
+                [0x64, 0x7d, 0x75],
+                [0x3c, 0x47, 0x11],
+                [0xdf, 0x80, 0x08],
+                [0x18, 0xe0, 0x00],
+                [0xbd, 0xe0, 0x00],
+                [0x00, 0xa9, 0xdf],
+                [0x00, 0x58, 0xdf],
+                [0x00, 0xdf, 0xc3],
+                [0x73, 0xf9, 0x90],
+            ],
+        }
+    }
+
+    #[test]
+    fn test_parse_kitty_alien_blood_exact() {
+        let dir = std::env::temp_dir().join("sysmon_kitty_alien_blood_exact");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("kitty.conf");
+        std::fs::write(&config, ALIEN_BLOOD_KITTY_CONF).unwrap();
+        let parsed = parse_kitty_config(&config).expect("should parse");
+        let expected = alien_blood_palette();
+        assert_eq!(parsed.bg, expected.bg, "bg");
+        assert_eq!(parsed.fg, expected.fg, "fg");
+        for i in 0..16 {
+            assert_eq!(parsed.colors[i], expected.colors[i], "slot {i}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_alien_blood_fixture_matches_parsed() {
+        let dir = std::env::temp_dir().join("sysmon_kitty_fixture_match");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("kitty.conf");
+        std::fs::write(&config, ALIEN_BLOOD_KITTY_CONF).unwrap();
+        let parsed = parse_kitty_config(&config).expect("should parse");
+        let fixture = alien_blood_palette();
+        assert_eq!(parsed.bg, fixture.bg);
+        assert_eq!(parsed.fg, fixture.fg);
+        assert_eq!(parsed.colors, fixture.colors);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_alien_blood_semantic_helpers() {
+        // Hardcoded expected RGBs — inlining the `lerp` formula here would
+        // let a regression in `lerp_rgb` pass silently. Frozen numbers are
+        // the whole point of the lock-in.
+        let p = alien_blood_palette();
+        assert_eq!(p.surface(), Color::Rgb(0x11, 0x26, 0x15));
+        assert_eq!(p.red(), Color::Rgb(0x7f, 0x2b, 0x26));
+        assert_eq!(p.green(), Color::Rgb(0x2f, 0x7e, 0x25));
+        assert_eq!(p.yellow(), Color::Rgb(0x70, 0x7f, 0x23));
+        assert_eq!(p.blue(), Color::Rgb(0x2f, 0x69, 0x7f));
+        assert_eq!(p.magenta(), Color::Rgb(0x47, 0x57, 0x7e));
+        assert_eq!(p.cyan(), Color::Rgb(0x31, 0x7f, 0x76));
+        assert_eq!(p.label(), Color::Rgb(0x64, 0x7d, 0x75));
+        assert_eq!(p.bright_surface(), Color::Rgb(0x3c, 0x47, 0x11));
+        assert_eq!(p.bright_red(), Color::Rgb(0xdf, 0x80, 0x08));
+        assert_eq!(p.bright_green(), Color::Rgb(0x18, 0xe0, 0x00));
+        assert_eq!(p.bright_yellow(), Color::Rgb(0xbd, 0xe0, 0x00));
+        assert_eq!(p.bright_blue(), Color::Rgb(0x00, 0xa9, 0xdf));
+        assert_eq!(p.bright_magenta(), Color::Rgb(0x00, 0x58, 0xdf));
+        assert_eq!(p.bright_cyan(), Color::Rgb(0x00, 0xdf, 0xc3));
+        assert_eq!(p.bright_label(), Color::Rgb(0x73, 0xf9, 0x90));
+        assert_eq!(p.bg_color(), Color::Rgb(0x0f, 0x16, 0x0f));
+        assert_eq!(p.fg_color(), Color::Rgb(0x63, 0x7d, 0x75));
+        // Muted label: every tool's border_color / label_color; shared line_chart axis.
+        assert_eq!(p.muted_label(), Color::Rgb(73, 125, 77));
+        // lerp(11, 9, 0.5) — gpu temp_color, cpu usage_color for 60-85% band.
+        assert_eq!(p.lerp(11, 9, 0.5), Color::Rgb(206, 176, 4));
+        // mix_with_bg(0, 0.5) — cpu/net dim columns.
+        assert_eq!(p.mix_with_bg(0, 0.5), Color::Rgb(16, 30, 18));
+        // mix_with_bg(14, 0.25) — poly selected_bg.
+        assert_eq!(p.mix_with_bg(14, 0.25), Color::Rgb(11, 72, 60));
+        // mix_with_bg(7, 0.4) — poly muted_color.
+        assert_eq!(p.mix_with_bg(7, 0.4), Color::Rgb(49, 63, 55));
+    }
+
+    // ---------------------------------------------------------------
+    // Brightness helpers
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_rgb_luminance_extremes() {
+        assert!((rgb_luminance([0, 0, 0])).abs() < 1e-9);
+        assert!((rgb_luminance([255, 255, 255]) - 1.0).abs() < 1e-9);
+        assert!((rgb_luminance([255, 0, 0]) - 0.2126).abs() < 1e-4);
+        assert!((rgb_luminance([0, 255, 0]) - 0.7152).abs() < 1e-4);
+        assert!((rgb_luminance([0, 0, 255]) - 0.0722).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_is_dark_alien_blood() {
+        assert!(alien_blood_palette().is_dark());
+    }
+
+    #[test]
+    fn test_is_dark_light_theme() {
+        let light = Palette { bg: [240, 240, 240], ..Palette::default() };
+        assert!(!light.is_dark());
+    }
+
+    #[test]
+    fn test_contrast_ratio_sanity() {
+        let p = Palette::default();
+        assert!((p.contrast_ratio([0, 0, 0], [255, 255, 255]) - 21.0).abs() < 1e-9);
+        assert!((p.contrast_ratio([255, 255, 255], [255, 255, 255]) - 1.0).abs() < 1e-9);
+    }
+
+    // ---------------------------------------------------------------
+    // Missing-brights fallback
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_brights_uninitialized_default_is_false() {
+        assert!(!Palette::default().brights_uninitialized());
+    }
+
+    #[test]
+    fn test_brights_uninitialized_alien_blood_is_false() {
+        assert!(!alien_blood_palette().brights_uninitialized());
+    }
+
+    #[test]
+    fn test_synthesize_brights_no_op_on_alien_blood() {
+        let mut p = alien_blood_palette();
+        let expected = alien_blood_palette();
+        p.synthesize_brights();
+        assert_eq!(p.bg, expected.bg);
+        assert_eq!(p.fg, expected.fg);
+        assert_eq!(p.colors, expected.colors);
+    }
+
+    #[test]
+    fn test_parse_kitty_only_basics_fills_brights() {
+        let dir = std::env::temp_dir().join("sysmon_kitty_basics_only");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("kitty.conf");
+        // Only color0-color7 + bg + fg — no brights defined.
+        std::fs::write(&config, "\
+background #0f160f
+foreground #637d75
+color0 #112615
+color1 #7f2b26
+color2 #2f7e25
+color3 #707f23
+color4 #2f697f
+color5 #47577e
+color6 #317f76
+color7 #647d75
+").unwrap();
+        let palette = parse_kitty_config(&config).expect("should parse");
+        // Every bright slot must now be non-zero (synthesis fired).
+        for i in 8..16 {
+            assert_ne!(palette.colors[i], [0, 0, 0], "bright slot {i} not synthesized");
+        }
+        // For slots 1..=7 in a dark theme, bright should be lighter than basic.
+        for i in 1..=7 {
+            let basic = rgb_luminance(palette.colors[i]);
+            let bright = rgb_luminance(palette.colors[i + 8]);
+            assert!(
+                bright > basic,
+                "bright slot {} ({:?}, lum={}) not lighter than basic {} ({:?}, lum={})",
+                i + 8,
+                palette.colors[i + 8],
+                bright,
+                i,
+                palette.colors[i],
+                basic,
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_parse_ghostty_only_basics_fills_brights() {
+        let text = "\
+palette = 0=#112615
+palette = 1=#7f2b26
+palette = 2=#2f7e25
+palette = 3=#707f23
+palette = 4=#2f697f
+palette = 5=#47577e
+palette = 6=#317f76
+palette = 7=#647d75
+background = #0f160f
+foreground = #637d75
+";
+        let palette = parse_ghostty_theme(text).expect("should parse");
+        for i in 8..16 {
+            assert_ne!(palette.colors[i], [0, 0, 0], "bright slot {i} not synthesized");
+        }
+        for i in 1..=7 {
+            let basic = rgb_luminance(palette.colors[i]);
+            let bright = rgb_luminance(palette.colors[i + 8]);
+            assert!(bright > basic, "slot {}: bright not lighter than basic", i + 8);
+        }
+    }
+
+    #[test]
+    fn test_synthesize_brights_light_theme() {
+        // Light background, zeroed brights, moderate-luminance basics.
+        let mut p = Palette {
+            bg: [240, 240, 240],
+            fg: [20, 20, 20],
+            colors: [
+                [200, 200, 200], // slot 0 (surface)
+                [180, 100, 100], // 1
+                [100, 180, 100], // 2
+                [180, 180, 100], // 3
+                [100, 100, 180], // 4
+                [180, 100, 180], // 5
+                [100, 180, 180], // 6
+                [120, 120, 120], // 7
+                [0, 0, 0],       // 8..15 zeroed → synthesize
+                [0, 0, 0],
+                [0, 0, 0],
+                [0, 0, 0],
+                [0, 0, 0],
+                [0, 0, 0],
+                [0, 0, 0],
+                [0, 0, 0],
+            ],
+        };
+        assert!(!p.is_dark(), "test fixture must have light bg");
+        p.synthesize_brights();
+        // On a light theme, brights should be DARKER than basics so they pop
+        // against the pale background.
+        for i in 1..=7 {
+            let basic = rgb_luminance(p.colors[i]);
+            let bright = rgb_luminance(p.colors[i + 8]);
+            assert!(
+                bright < basic,
+                "light theme: bright slot {} ({:?}) should be darker than basic {} ({:?})",
+                i + 8,
+                p.colors[i + 8],
+                i,
+                p.colors[i],
+            );
+        }
+        // Slot 8 follows fg, which is dark — should be darker than slot 0.
+        let s0 = rgb_luminance(p.colors[0]);
+        let s8 = rgb_luminance(p.colors[8]);
+        assert!(s8 < s0, "slot 8 should lean toward fg (dark) on light theme");
     }
 }
