@@ -44,6 +44,7 @@ fn main() -> Result<()> {
     }
 
     terminal::enable_raw_mode()?;
+    sysmon_shared::terminal_theme::init();
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);

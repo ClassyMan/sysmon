@@ -13,8 +13,8 @@ fn mem_color() -> Color { palette().bright_cyan() }
 fn temp_color() -> Color { palette().lerp(11, 9, 0.5) }
 fn power_color() -> Color { palette().bright_yellow() }
 fn vram_color() -> Color { palette().bright_cyan() }
-fn border_color() -> Color { palette().surface() }
-fn label_color() -> Color { palette().label() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
 
 pub fn render(frame: &mut Frame, app: &App) {
     render_in(frame, frame.area(), app);

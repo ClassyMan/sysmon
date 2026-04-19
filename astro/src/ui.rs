@@ -9,8 +9,8 @@ use crate::collector::DecodedImage;
 use sysmon_shared::terminal_theme::palette;
 
 fn astro_color() -> Color { palette().bright_cyan() }
-fn border_color() -> Color { palette().surface() }
-fn label_color() -> Color { palette().label() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
 fn nav_color() -> Color { palette().bright_cyan() }
 fn mode_color() -> Color { palette().bright_yellow() }
 

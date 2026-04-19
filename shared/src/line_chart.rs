@@ -3,6 +3,8 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Widget};
 
+use crate::terminal_theme::palette;
+
 pub struct Dataset<'a> {
     pub data: &'a [(f64, f64)],
     pub color: Color,
@@ -155,7 +157,7 @@ fn render_legend(buf: &mut Buffer, area: Rect, datasets: &[Dataset]) {
 
     let bx = area.right() - box_w;
     let by = area.y;
-    let bs = Style::default().fg(Color::DarkGray);
+    let bs = Style::default().fg(palette().muted_label());
 
     set_ch(buf, bx, by, '┌', bs);
     for x in (bx + 1)..(bx + box_w - 1) {

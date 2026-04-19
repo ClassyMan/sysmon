@@ -8,8 +8,8 @@ use crate::app::App;
 use sysmon_shared::line_chart::{self, LineChart};
 use sysmon_shared::terminal_theme::palette;
 
-fn border_color() -> Color { palette().surface() }
-fn label_color() -> Color { palette().label() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
 fn total_color() -> Color { palette().bright_green() }
 
 fn usage_color(pct: f64) -> Color {

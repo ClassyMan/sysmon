@@ -13,6 +13,7 @@ pub enum Panel {
     Ram(ram::app::App),
     Dio(dio::app::App),
     Net(net::app::App),
+    Audio(audio::app::App),
     Poly {
         app: poly::app::App,
         shared: Arc<Mutex<poly::collector::FetchState>>,
@@ -44,8 +45,15 @@ impl Panel {
         Ok(Panel::Ram(app))
     }
 
-    pub fn new_dio(refresh_ms: u64, scrollback_secs: u64) -> Result<Self> {
+    pub fn new_dio(
+        refresh_ms: u64,
+        scrollback_secs: u64,
+        picker: Option<&mut ratatui_image::picker::Picker>,
+    ) -> Result<Self> {
         let mut app = dio::app::App::new(refresh_ms, scrollback_secs, false);
+        if let Some(picker) = picker {
+            app.load_drive_animation(picker);
+        }
         app.tick()?;
         Ok(Panel::Dio(app))
     }
@@ -54,6 +62,11 @@ impl Panel {
         let mut app = net::app::App::new(refresh_ms, scrollback_secs);
         app.tick()?;
         Ok(Panel::Net(app))
+    }
+
+    pub fn new_audio() -> Result<Self> {
+        let app = audio::app::App::new()?;
+        Ok(Panel::Audio(app))
     }
 
     pub fn new_poly(refresh_ms: u64) -> Self {
@@ -88,6 +101,10 @@ impl Panel {
             Panel::Ram(app) => app.tick(),
             Panel::Dio(app) => app.tick(),
             Panel::Net(app) => app.tick(),
+            Panel::Audio(app) => {
+                app.tick();
+                Ok(())
+            }
             Panel::Poly { app, .. } => {
                 app.tick();
                 Ok(())
@@ -99,13 +116,14 @@ impl Panel {
         }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         match self {
             Panel::Cpu(app) => cpu::ui::render_in(frame, area, app),
             Panel::Gpu(app) => gpu::ui::render_in(frame, area, app),
             Panel::Ram(app) => ram::ui::render_in(frame, area, app),
             Panel::Dio(app) => dio::ui::render_in(frame, area, app),
             Panel::Net(app) => net::ui::render_in(frame, area, app),
+            Panel::Audio(app) => audio::ui::render_in(frame, area, app),
             Panel::Poly { app, .. } => poly::ui::render_in(frame, area, app),
             Panel::Astro { app, .. } => astro::ui::render_in(frame, area, app),
         }
@@ -120,6 +138,7 @@ impl Panel {
                 app.handle_action(dio::input::AppAction::ToggleFastMode);
             }
             Panel::Net(app) => app.toggle_fast_mode(),
+            Panel::Audio(_) => {}
             Panel::Poly { .. } => {}
             Panel::Astro { .. } => {}
         }
@@ -146,11 +165,11 @@ impl Panel {
                 _ => {}
             },
             Panel::Astro { app, .. } => match key.code {
-                KeyCode::Char('j') | KeyCode::Down => app.select_next(),
-                KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
+                KeyCode::Right | KeyCode::Char('l') => app.select_next(),
+                KeyCode::Left | KeyCode::Char('h') => app.select_prev(),
+                KeyCode::Down | KeyCode::Char('j') => app.scroll_down(),
+                KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
                 KeyCode::Char('v') => app.toggle_view(),
-                KeyCode::Char('J') => app.scroll_down(),
-                KeyCode::Char('K') => app.scroll_up(),
                 _ => {}
             },
             _ => {}
@@ -164,6 +183,7 @@ impl Panel {
             Panel::Ram(app) => app.refresh_rate(),
             Panel::Dio(app) => app.refresh_rate,
             Panel::Net(app) => app.refresh_rate(),
+            Panel::Audio(app) => app.refresh_rate(),
             Panel::Poly { .. } => Duration::from_millis(500),
             Panel::Astro { .. } => Duration::from_millis(500),
         }
@@ -176,6 +196,7 @@ impl Panel {
             Panel::Ram(_) => "RAM",
             Panel::Dio(_) => "DIO",
             Panel::Net(_) => "NET",
+            Panel::Audio(_) => "AUDIO",
             Panel::Poly { .. } => "POLY",
             Panel::Astro { .. } => "ASTRO",
         }

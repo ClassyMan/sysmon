@@ -1,4 +1,4 @@
-name: sysmon-tools
+name: sysmon
 version: '4.0.0'
 summary: Real-time system monitors with terminal charts
 description: |
@@ -13,7 +13,7 @@ description: |
   - astro: NASA Astronomy Picture of the Day viewer
   - sysmon: Compositing dashboard that tiles multiple tools
 
-title: Sysmon Tools
+title: Sysmon
 license: MIT
 contact: https://github.com/ClassyMan/sysmon/issues
 source-code: https://github.com/ClassyMan/sysmon
@@ -32,6 +32,13 @@ parts:
       - rustup
     build-packages:
       - pkg-config
+      - clang
+      - libclang-dev
+      - libpipewire-0.3-dev
+      - libspa-0.2-dev
+    stage-packages:
+      - libpipewire-0.3-0
+      - libspa-0.2-modules
     override-build: |
       rustup default stable
       cargo build --release
@@ -51,9 +58,7 @@ apps:
     plugs:
       - system-observe
       - hardware-observe
-    environment:
-      # nvidia-smi lives outside the snap — needs host PATH
-      PATH: /usr/bin:/usr/local/bin:$SNAP/usr/bin:$PATH
+      - opengl             # libnvidia-ml.so for NVML bindings
   ram:
     command: bin/ram
     plugs:
@@ -74,8 +79,11 @@ apps:
   audio:
     command: bin/audio
     plugs:
-      - audio-playback    # PipeWire/PulseAudio access
-      - audio-record      # pw-record capture
+      - audio-playback    # PipeWire socket access
+      - audio-record      # PipeWire monitor capture
+    environment:
+      SPA_PLUGIN_DIR: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/spa-0.2
+      PIPEWIRE_MODULE_DIR: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/pipewire-0.3
   poly:
     command: bin/poly
     plugs:
@@ -91,9 +99,13 @@ apps:
     plugs:
       - system-observe
       - hardware-observe
+      - opengl
       - network
       - network-observe
       - process-control
       - audio-playback
       - audio-record
       - home
+    environment:
+      SPA_PLUGIN_DIR: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/spa-0.2
+      PIPEWIRE_MODULE_DIR: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/pipewire-0.3

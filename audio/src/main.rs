@@ -1,29 +1,22 @@
-mod capture;
-mod spectrum;
-mod ui;
-
 use std::io;
 use std::panic;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
-use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
-use ratatui::backend::CrosstermBackend;
+use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
-use crate::capture::AudioCapture;
-use crate::spectrum::SpectrumAnalyzer;
-
-const FFT_SIZE: usize = 4096;
-const REFRESH_MS: u64 = 33; // ~30fps for smooth animation
+use audio::app::App;
+use audio::ui;
 
 fn main() -> Result<()> {
-    let audio = AudioCapture::start_monitor()?;
-    let device_name = audio.device_name.clone();
+    let mut app = App::new()?;
 
     terminal::enable_raw_mode()?;
+    sysmon_shared::terminal_theme::init();
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
@@ -36,7 +29,7 @@ fn main() -> Result<()> {
         default_hook(info);
     }));
 
-    let result = run(&mut terminal, &audio, &device_name);
+    let result = run(&mut terminal, &mut app);
 
     terminal::disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -47,19 +40,15 @@ fn main() -> Result<()> {
 
 fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    audio: &AudioCapture,
-    device_name: &str,
+    app: &mut App,
 ) -> Result<()> {
-    let mut analyzer = SpectrumAnalyzer::new(FFT_SIZE);
-    let refresh_rate = Duration::from_millis(REFRESH_MS);
     let mut last_tick = Instant::now();
 
     loop {
-        terminal.draw(|frame| {
-            ui::render(frame, &analyzer, audio.sample_rate, device_name);
-        })?;
+        terminal.draw(|frame| ui::render(frame, app))?;
 
-        let timeout = refresh_rate
+        let timeout = app
+            .refresh_rate()
             .checked_sub(last_tick.elapsed())
             .unwrap_or_default();
 
@@ -75,9 +64,8 @@ fn run(
             }
         }
 
-        if last_tick.elapsed() >= refresh_rate {
-            let samples = audio.take_samples(FFT_SIZE);
-            analyzer.process(&samples);
+        if last_tick.elapsed() >= app.refresh_rate() {
+            app.tick();
             last_tick = Instant::now();
         }
     }

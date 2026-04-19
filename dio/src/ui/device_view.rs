@@ -51,27 +51,56 @@ pub fn render_single(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
+const LATENCY_MIN_WIDTH: u16 = 140;
+
 fn render_device(frame: &mut Frame, area: Rect, device: &DeviceSeries, refresh_ms: f64) {
-    // 2x2 grid: IOPS (left) | Latency (right), each split into read (top) / write (bottom)
-    let [left_area, right_area] =
-        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .areas(area);
-
-    let [read_iops_area, write_iops_area] =
-        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .areas(left_area);
-
-    let [read_lat_area, write_lat_area] =
-        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .areas(right_area);
-
     let y_max_iops = nice_ceil(device.iops_y.current());
-    let y_max_lat = nice_ceil(device.latency_y.current());
+    let show_latency = area.width >= LATENCY_MIN_WIDTH;
+
+    let iops_area = if show_latency {
+        let [left, right] =
+            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .areas(area);
+
+        let [read_lat_area, write_lat_area] =
+            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .areas(right);
+
+        let y_max_lat = nice_ceil(device.latency_y.current());
+
+        render_single_chart(frame, read_lat_area, &ChartSpec {
+            title: "read latency",
+            buf: &device.read_latency,
+            color: theme::read_color(),
+            format_value: crate::model::types::human_latency,
+            refresh_ms,
+        }, y_max_lat);
+
+        render_single_chart(frame, write_lat_area, &ChartSpec {
+            title: "write latency",
+            buf: &device.write_latency,
+            color: theme::write_color(),
+            format_value: crate::model::types::human_latency,
+            refresh_ms,
+        }, y_max_lat);
+
+        left
+    } else {
+        area
+    };
+
+    let [read_iops_area, write_iops_area] = if show_latency {
+        Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .areas(iops_area)
+    } else {
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .areas(iops_area)
+    };
 
     render_single_chart(frame, read_iops_area, &ChartSpec {
         title: &format!("{} — read IOPS", device.name),
         buf: &device.read_iops,
-        color: theme::READ_COLOR,
+        color: theme::read_color(),
         format_value: crate::model::types::human_iops,
         refresh_ms,
     }, y_max_iops);
@@ -79,26 +108,10 @@ fn render_device(frame: &mut Frame, area: Rect, device: &DeviceSeries, refresh_m
     render_single_chart(frame, write_iops_area, &ChartSpec {
         title: &format!("{} — write IOPS", device.name),
         buf: &device.write_iops,
-        color: theme::WRITE_COLOR,
+        color: theme::write_color(),
         format_value: crate::model::types::human_iops,
         refresh_ms,
     }, y_max_iops);
-
-    render_single_chart(frame, read_lat_area, &ChartSpec {
-        title: "read latency",
-        buf: &device.read_latency,
-        color: theme::READ_COLOR,
-        format_value: crate::model::types::human_latency,
-        refresh_ms,
-    }, y_max_lat);
-
-    render_single_chart(frame, write_lat_area, &ChartSpec {
-        title: "write latency",
-        buf: &device.write_latency,
-        color: theme::WRITE_COLOR,
-        format_value: crate::model::types::human_latency,
-        refresh_ms,
-    }, y_max_lat);
 }
 
 fn render_single_chart(frame: &mut Frame, area: Rect, spec: &ChartSpec, y_max: f64) {

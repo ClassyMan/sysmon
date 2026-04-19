@@ -10,8 +10,8 @@ use sysmon_shared::line_chart::{self, LineChart};
 use sysmon_shared::terminal_theme::palette;
 
 fn poly_color() -> Color { palette().bright_cyan() }
-fn border_color() -> Color { palette().surface() }
-fn label_color() -> Color { palette().label() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
 fn selected_bg() -> Color { palette().mix_with_bg(14, 0.25) }
 fn muted_color() -> Color { palette().mix_with_bg(7, 0.4) }
 fn topic_color() -> Color { palette().bright_cyan() }

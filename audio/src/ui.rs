@@ -8,8 +8,8 @@ use crate::app::App;
 use crate::spectrum::SpectrumAnalyzer;
 use sysmon_shared::terminal_theme::palette;
 
-fn border_color() -> Color { palette().surface() }
-fn label_color() -> Color { palette().label() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
 fn title_color() -> Color { palette().bright_cyan() }
 fn peak_color() -> Color { Color::Rgb(0xff, 0x55, 0x55) }
 
@@ -78,50 +78,65 @@ fn draw_spectrum(frame: &mut Frame, area: Rect, analyzer: &SpectrumAnalyzer, sam
         return;
     }
 
-    let bar_count = inner.width as usize;
+    const BAR_WIDTH: usize = 3;
+    const BAR_GAP: usize = 1;
+    const STRIDE: usize = BAR_WIDTH + BAR_GAP;
+
+    let bar_count = (inner.width as usize).div_ceil(STRIDE).max(1);
     let height = inner.height as usize;
     let values = analyzer.get_bar_values(bar_count, sample_rate);
     let peaks = analyzer.get_peak_values(bar_count, sample_rate);
 
     let buf = frame.buffer_mut();
 
-    for (col_idx, (&value, &peak)) in values.iter().zip(peaks.iter()).enumerate() {
-        let col = inner.x + col_idx as u16;
+    for (bar_idx, (&value, &peak)) in values.iter().zip(peaks.iter()).enumerate() {
+        let col_start = bar_idx * STRIDE;
+        if col_start >= inner.width as usize {
+            break;
+        }
         let bar_height_sub = (value * height as f32 * 8.0).round() as usize;
         let peak_row_sub = (peak * height as f32 * 8.0).round() as usize;
 
-        // Draw the bar from bottom up
-        for row_idx in 0..height {
-            let row = inner.y + (height - 1 - row_idx) as u16;
-            let cell_bottom = row_idx * 8;
-            let cell_top = cell_bottom + 8;
+        for sub_col in 0..BAR_WIDTH {
+            let col_offset = col_start + sub_col;
+            if col_offset >= inner.width as usize {
+                break;
+            }
+            let col = inner.x + col_offset as u16;
 
-            if bar_height_sub >= cell_top {
-                let ch = '█';
-                let color = bar_color(row_idx, height);
-                if let Some(cell) = buf.cell_mut((col, row)) {
-                    cell.set_char(ch);
-                    cell.set_style(Style::default().fg(color));
-                }
-            } else if bar_height_sub > cell_bottom {
-                let fill = bar_height_sub - cell_bottom;
-                let ch = BAR_BLOCKS[fill.min(8)];
-                let color = bar_color(row_idx, height);
-                if let Some(cell) = buf.cell_mut((col, row)) {
-                    cell.set_char(ch);
-                    cell.set_style(Style::default().fg(color));
+            // Draw the bar from bottom up
+            for row_idx in 0..height {
+                let row = inner.y + (height - 1 - row_idx) as u16;
+                let cell_bottom = row_idx * 8;
+                let cell_top = cell_bottom + 8;
+
+                if bar_height_sub >= cell_top {
+                    let ch = '█';
+                    let color = bar_color(row_idx, height);
+                    if let Some(cell) = buf.cell_mut((col, row)) {
+                        cell.set_char(ch);
+                        cell.set_style(Style::default().fg(color));
+                    }
+                } else if bar_height_sub > cell_bottom {
+                    let fill = bar_height_sub - cell_bottom;
+                    let ch = BAR_BLOCKS[fill.min(8)];
+                    let color = bar_color(row_idx, height);
+                    if let Some(cell) = buf.cell_mut((col, row)) {
+                        cell.set_char(ch);
+                        cell.set_style(Style::default().fg(color));
+                    }
                 }
             }
-        }
 
-        // Overlay peak marker on top — always visible, even inside the bar region
-        if peak_row_sub > 0 {
-            let peak_row_idx = (peak_row_sub.saturating_sub(1)) / 8;
-            if peak_row_idx < height {
-                let row = inner.y + (height - 1 - peak_row_idx) as u16;
-                if let Some(cell) = buf.cell_mut((col, row)) {
-                    cell.set_char('━');
-                    cell.set_style(Style::default().fg(peak_color()).add_modifier(Modifier::BOLD));
+            // Overlay peak marker on top — always visible, even inside the bar region
+            if peak_row_sub > 0 {
+                let peak_row_idx = (peak_row_sub.saturating_sub(1)) / 8;
+                if peak_row_idx < height {
+                    let row = inner.y + (height - 1 - peak_row_idx) as u16;
+                    if let Some(cell) = buf.cell_mut((col, row)) {
+                        cell.set_char('━');
+                        cell.set_style(Style::default().fg(peak_color()).add_modifier(Modifier::BOLD));
+                    }
                 }
             }
         }

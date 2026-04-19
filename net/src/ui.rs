@@ -11,8 +11,8 @@ use sysmon_shared::terminal_theme::palette;
 
 fn down_color() -> Color { palette().bright_green() }
 fn up_color() -> Color { palette().bright_yellow() }
-fn border_color() -> Color { palette().surface() }
-fn label_color() -> Color { palette().label() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
 
 pub fn render(frame: &mut Frame, app: &App) {
     render_in(frame, frame.area(), app);

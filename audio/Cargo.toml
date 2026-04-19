@@ -11,3 +11,6 @@ crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 rustfft = "6"
+pipewire = "0.9"
+libspa = "0.9"
+sysmon-shared = { path = "../shared" }

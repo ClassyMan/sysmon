@@ -17,8 +17,8 @@ fn fault_color() -> Color { palette().bright_green() }
 fn major_fault_color() -> Color { palette().bright_red() }
 fn psi_some_color() -> Color { palette().bright_yellow() }
 fn psi_full_color() -> Color { palette().bright_red() }
-fn border_color() -> Color { palette().surface() }
-fn label_color() -> Color { palette().label() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
 
 pub fn render(frame: &mut Frame, app: &App) {
     render_in(frame, frame.area(), app);

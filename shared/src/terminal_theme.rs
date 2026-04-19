@@ -263,6 +263,8 @@ impl Palette {
     pub fn bg_color(&self) -> Color { Color::Rgb(self.bg[0], self.bg[1], self.bg[2]) }
     pub fn fg_color(&self) -> Color { Color::Rgb(self.fg[0], self.fg[1], self.fg[2]) }
 
+    pub fn muted_label(&self) -> Color { self.lerp(2, 7, 0.5) }
+
     /// Linear interpolation between two palette slots (raw rgb).
     pub fn lerp(&self, slot_a: usize, slot_b: usize, t: f64) -> Color {
         lerp_rgb(self.colors[slot_a.min(15)], self.colors[slot_b.min(15)], t)

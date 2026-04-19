@@ -35,6 +35,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     terminal::enable_raw_mode()?;
+    sysmon_shared::terminal_theme::init();
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
@@ -79,11 +80,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, api_key: &str) -> 
                     KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                         app.should_quit = true;
                     }
-                    KeyCode::Char('j') | KeyCode::Down => app.select_next(),
-                    KeyCode::Char('k') | KeyCode::Up => app.select_prev(),
+                    KeyCode::Right | KeyCode::Char('l') => app.select_next(),
+                    KeyCode::Left | KeyCode::Char('h') => app.select_prev(),
+                    KeyCode::Down | KeyCode::Char('j') => app.scroll_down(),
+                    KeyCode::Up | KeyCode::Char('k') => app.scroll_up(),
                     KeyCode::Char('v') => app.toggle_view(),
-                    KeyCode::Char('J') => app.scroll_down(),
-                    KeyCode::Char('K') => app.scroll_up(),
                     _ => {}
                 }
             }
