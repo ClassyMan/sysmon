@@ -34,7 +34,7 @@ pub fn render(frame: &mut Frame, area: Rect, table: &ProcessIoTable) {
     let header = Row::new(header_cells)
         .style(
             Style::default()
-                .fg(theme::SELECTED_TAB_COLOR)
+                .fg(theme::selected_tab_color())
                 .add_modifier(Modifier::BOLD),
         )
         .height(1);

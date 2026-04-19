@@ -7,6 +7,7 @@ pub struct SpectrumAnalyzer {
     pub bins: Vec<f32>,
     pub peak_bins: Vec<f32>,
     decay_rate: f32,
+    bar_fall_rate: f32,
     floor_db: f32,
     range_db: f32,
 }
@@ -28,7 +29,8 @@ impl SpectrumAnalyzer {
             window,
             bins: vec![0.0; bin_count],
             peak_bins: vec![0.0; bin_count],
-            decay_rate: 0.92,
+            decay_rate: 0.985,
+            bar_fall_rate: 0.88,
             floor_db: -80.0,
             range_db: 50.0,
         }
@@ -36,9 +38,9 @@ impl SpectrumAnalyzer {
 
     pub fn process(&mut self, samples: &[f32]) {
         if samples.len() < self.fft_size {
-            // Decay existing bins toward zero
+            // Gently decay existing bins toward zero (visible fade).
             for bin in &mut self.bins {
-                *bin *= 0.8;
+                *bin *= self.bar_fall_rate;
             }
             for (peak, current) in self.peak_bins.iter_mut().zip(self.bins.iter()) {
                 if *current > *peak {
@@ -83,7 +85,9 @@ impl SpectrumAnalyzer {
         for idx in 0..bin_count {
             let normalized = ((db_values[idx] - floor) / (ceiling - floor)).clamp(0.0, 1.0);
             // Apply a sqrt curve to boost quieter values visually
-            self.bins[idx] = normalized.sqrt();
+            let target = normalized.sqrt();
+            // Fast attack: snap up instantly. Slow decay: glide down by fall_rate.
+            self.bins[idx] = target.max(self.bins[idx] * self.bar_fall_rate);
         }
 
         for (peak, current) in self.peak_bins.iter_mut().zip(self.bins.iter()) {

@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use anyhow::Result;
 
 use crate::collector::{self, InterfaceInfo, NetRates, NetSnapshot};
@@ -29,6 +31,7 @@ pub struct App {
     pub tx_y: StickyMax,
     pub view_mode: ViewMode,
     pub rain: RainState,
+    pub rain_panel_size: Cell<Option<(u16, u16)>>,
     normal_refresh_ms: u64,
     normal_scrollback_secs: u64,
     prev_snapshot: Option<NetSnapshot>,
@@ -47,11 +50,12 @@ impl App {
             should_quit: false,
             scrollback_secs,
             fast_mode: false,
-            refresh_ms,
+            refresh_ms: RAIN_REFRESH_MS,
             rx_y: StickyMax::new(),
             tx_y: StickyMax::new(),
-            view_mode: ViewMode::Charts,
+            view_mode: ViewMode::Rain,
             rain: RainState::new(),
+            rain_panel_size: Cell::new(None),
             normal_refresh_ms: refresh_ms,
             normal_scrollback_secs: scrollback_secs,
             prev_snapshot: None,
@@ -149,10 +153,13 @@ impl App {
         self.prev_snapshot = Some(snapshot);
 
         if self.view_mode == ViewMode::Rain {
-            let (term_width, term_height) = crossterm::terminal::size().unwrap_or((80, 24));
+            let (width, height) = self.rain_panel_size.get().unwrap_or_else(|| {
+                let (w, h) = crossterm::terminal::size().unwrap_or((80, 24));
+                (w, h.saturating_sub(8))
+            });
             let rx = self.latest_rates.as_ref().map_or(0.0, |r| r.rx_bytes_per_sec);
             let tx = self.latest_rates.as_ref().map_or(0.0, |r| r.tx_bytes_per_sec);
-            self.rain.tick(term_width, term_height.saturating_sub(8), rx, tx);
+            self.rain.tick(width, height, rx, tx);
         }
 
         Ok(())
@@ -215,6 +222,7 @@ mod tests {
                 tx_y: StickyMax::new(),
                 view_mode: ViewMode::Charts,
                 rain: RainState::new(),
+                rain_panel_size: Cell::new(None),
                 normal_refresh_ms: 500,
                 normal_scrollback_secs: 60,
                 prev_snapshot: None,

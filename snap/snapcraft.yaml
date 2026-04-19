@@ -1,0 +1,111 @@
+name: sysmon
+version: '4.0.0'
+summary: Real-time system monitors with terminal charts
+description: |
+  A collection of TUI monitoring tools built with Rust and ratatui:
+  - cpu: Per-core CPU utilization
+  - gpu: NVIDIA GPU metrics (nvidia-smi)
+  - ram: Memory, swap, PSI pressure
+  - dio: Disk IOPS and latency
+  - net: Network throughput + matrix rain
+  - audio: FFT spectrum analyzer (PipeWire)
+  - poly: Polymarket prediction market dashboard
+  - astro: NASA Astronomy Picture of the Day viewer
+  - sysmon: Compositing dashboard that tiles multiple tools
+
+title: Sysmon
+license: MIT
+contact: https://github.com/ClassyMan/sysmon/issues
+source-code: https://github.com/ClassyMan/sysmon
+grade: stable
+confinement: strict
+base: core24
+platforms:
+  amd64:
+    build-on: [amd64]
+
+parts:
+  sysmon:
+    plugin: nil
+    source: .
+    build-snaps:
+      - rustup
+    build-packages:
+      - pkg-config
+      - clang
+      - libclang-dev
+      - libpipewire-0.3-dev
+      - libspa-0.2-dev
+    stage-packages:
+      - libpipewire-0.3-0
+      - libspa-0.2-modules
+    override-build: |
+      rustup default stable
+      cargo build --release
+      mkdir -p $CRAFT_PART_INSTALL/bin
+      for bin in cpu gpu ram dio net audio poly astro sysmon; do
+        cp target/release/$bin $CRAFT_PART_INSTALL/bin/
+      done
+
+apps:
+  cpu:
+    command: bin/cpu
+    plugs:
+      - system-observe    # /proc/stat, /proc/cpuinfo
+      - hardware-observe  # /sys/class/hwmon (temperatures)
+  gpu:
+    command: bin/gpu
+    plugs:
+      - system-observe
+      - hardware-observe
+      - opengl             # libnvidia-ml.so for NVML bindings
+  ram:
+    command: bin/ram
+    plugs:
+      - system-observe    # /proc/meminfo, /proc/vmstat, /proc/pressure
+      - hardware-observe  # /sys/devices (DIMM info)
+      - home              # ~/.cache for hardware info cache
+  dio:
+    command: bin/dio
+    plugs:
+      - system-observe    # /proc/diskstats
+      - hardware-observe  # /sys/block, /sys/class/nvme
+      - process-control   # /proc/*/io for per-process disk I/O
+  net:
+    command: bin/net
+    plugs:
+      - system-observe    # /proc/net/dev
+      - network-observe   # network interface info
+  audio:
+    command: bin/audio
+    plugs:
+      - audio-playback    # PipeWire socket access
+      - audio-record      # PipeWire monitor capture
+    environment:
+      SPA_PLUGIN_DIR: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/spa-0.2
+      PIPEWIRE_MODULE_DIR: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/pipewire-0.3
+  poly:
+    command: bin/poly
+    plugs:
+      - network           # Polymarket API access
+      - home              # ~/.config for settings
+  astro:
+    command: bin/astro
+    plugs:
+      - network           # NASA APOD API
+      - home              # ~/.cache/sysmon/astro (cache), ~/.config/kitty (theme)
+  sysmon:
+    command: bin/sysmon
+    plugs:
+      - system-observe
+      - hardware-observe
+      - opengl
+      - network
+      - network-observe
+      - process-control
+      - audio-playback
+      - audio-record
+      - home
+    environment:
+      SPA_PLUGIN_DIR: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/spa-0.2
+      PIPEWIRE_MODULE_DIR: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET/pipewire-0.3

@@ -9,6 +9,8 @@ use crate::collector::hwinfo::DiskHwInfo;
 use crate::input::AppAction;
 use crate::model::device::DeviceSeries;
 use crate::model::process::{ProcessIoTable, ProcessIoTracker};
+use crate::ui::animation::AnimatedGif;
+use ratatui_image::picker::Picker;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewMode {
@@ -32,6 +34,7 @@ pub struct App {
     pub process_table: ProcessIoTable,
     pub fast_mode: bool,
     pub disk_hw: HashMap<String, DiskHwInfo>,
+    pub animation: Option<AnimatedGif>,
     process_tracker: ProcessIoTracker,
     normal_refresh_ms: u64,
     normal_scrollback_secs: u64,
@@ -53,10 +56,15 @@ impl App {
             process_table: ProcessIoTable::new(),
             fast_mode: false,
             disk_hw: HashMap::new(),
+            animation: None,
             process_tracker: ProcessIoTracker::new(),
             normal_refresh_ms: refresh_ms,
             normal_scrollback_secs: scrollback_secs,
         }
+    }
+
+    pub fn load_drive_animation(&mut self, picker: &mut Picker) {
+        self.animation = AnimatedGif::load_drive(picker);
     }
 
     pub fn tick(&mut self) -> Result<()> {
@@ -187,6 +195,7 @@ mod tests {
                 process_table: ProcessIoTable::new(),
                 fast_mode: false,
                 disk_hw: HashMap::new(),
+                animation: None,
                 process_tracker: ProcessIoTracker::new(),
                 normal_refresh_ms: 500,
                 normal_scrollback_secs: 60,

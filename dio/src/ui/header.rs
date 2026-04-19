@@ -1,11 +1,12 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Tabs;
 
 use crate::app::{App, ViewMode};
 use crate::ui::theme;
+use sysmon_shared::terminal_theme::palette;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let device_names: Vec<Line> = app
@@ -30,13 +31,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .unwrap_or_default();
 
     let fast_span = if app.fast_mode {
-        Span::styled(" FAST ", Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Span::styled(" FAST ", Style::default().fg(palette().bg_color()).bg(palette().bright_yellow()).add_modifier(Modifier::BOLD))
     } else {
         Span::raw("")
     };
 
     let title = Line::from(vec![
-        Span::styled(" DISK ", Style::default().fg(theme::READ_COLOR).add_modifier(Modifier::BOLD)),
+        Span::styled(" DISK ", Style::default().fg(theme::read_color()).add_modifier(Modifier::BOLD)),
         fast_span,
         Span::styled(
             format!(" {} | {} | {}ms ",
@@ -44,25 +45,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 view_label,
                 app.refresh_rate.as_millis(),
             ),
-            Style::default().fg(theme::LABEL_COLOR),
+            Style::default().fg(theme::label_color()),
         ),
     ]);
 
     let tabs = Tabs::new(device_names)
         .select(app.selected_device)
-        .style(Style::default().fg(theme::LABEL_COLOR).bg(theme::HEADER_BG))
+        .style(Style::default().fg(theme::label_color()))
         .highlight_style(
             Style::default()
-                .fg(theme::SELECTED_TAB_COLOR)
+                .fg(theme::selected_tab_color())
                 .add_modifier(Modifier::BOLD),
         )
         .divider("|")
         .padding(" ", " ")
-        .block(
-            ratatui::widgets::Block::default()
-                .title(title)
-                .style(Style::default().bg(theme::HEADER_BG)),
-        );
+        .block(ratatui::widgets::Block::default().title(title));
 
     frame.render_widget(tabs, area);
 }

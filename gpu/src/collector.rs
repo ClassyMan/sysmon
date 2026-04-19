@@ -1,5 +1,10 @@
-use std::process::Command;
-use anyhow::Result;
+use std::fs;
+use std::sync::OnceLock;
+
+use anyhow::{anyhow, Context, Result};
+use nvml_wrapper::enum_wrappers::device::{Clock, TemperatureSensor};
+use nvml_wrapper::enums::device::UsedGpuMemory;
+use nvml_wrapper::Nvml;
 
 #[derive(Debug, Clone)]
 pub struct GpuSnapshot {
@@ -69,136 +74,147 @@ pub struct GpuProcess {
     pub mem_pct: Option<f64>,
 }
 
-pub fn read_gpu_snapshot() -> Result<GpuSnapshot> {
-    let output = Command::new("nvidia-smi")
-        .args([
-            "--query-gpu=name,driver_version,pcie.link.gen.current,pcie.link.width.current,memory.total,memory.used,memory.free,utilization.gpu,utilization.memory,temperature.gpu,power.draw,power.limit,clocks.gr,clocks.mem,fan.speed",
-            "--format=csv,noheader,nounits",
-        ])
-        .output()?;
+static NVML: OnceLock<Result<Nvml, String>> = OnceLock::new();
 
-    if !output.status.success() {
-        anyhow::bail!("nvidia-smi failed: {}", String::from_utf8_lossy(&output.stderr));
-    }
-
-    let line = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    parse_gpu_csv(&line)
+fn nvml() -> Result<&'static Nvml> {
+    let outcome = NVML
+        .get_or_init(|| Nvml::init().map_err(|err| format!("NVML init failed: {err}")));
+    outcome.as_ref().map_err(|msg| anyhow!("{msg}"))
 }
 
-fn parse_gpu_csv(line: &str) -> Result<GpuSnapshot> {
-    let fields: Vec<&str> = line.split(", ").collect();
-    if fields.len() < 15 {
-        anyhow::bail!("unexpected nvidia-smi output: {}", line);
-    }
+const BYTES_PER_MIB: f64 = 1024.0 * 1024.0;
+
+pub fn read_gpu_snapshot() -> Result<GpuSnapshot> {
+    let nvml = nvml()?;
+    let device = nvml
+        .device_by_index(0)
+        .context("no NVIDIA device at index 0")?;
+
+    let driver = nvml.sys_driver_version().unwrap_or_default();
+    let name = device.name().unwrap_or_default();
+    let pcie_gen = device
+        .current_pcie_link_gen()
+        .map(|value| value.to_string())
+        .unwrap_or_else(|_| "?".into());
+    let pcie_width = device
+        .current_pcie_link_width()
+        .map(|value| value.to_string())
+        .unwrap_or_else(|_| "?".into());
+
+    let memory = device.memory_info().context("failed to read memory info")?;
+    let utilization = device
+        .utilization_rates()
+        .context("failed to read utilization rates")?;
+    let temperature = device.temperature(TemperatureSensor::Gpu).unwrap_or(0) as f64;
+    let power_milliwatts = device.power_usage().unwrap_or(0) as f64;
+    let power_limit_milliwatts = device.power_management_limit().unwrap_or(0) as f64;
+    let clock_graphics = device.clock_info(Clock::Graphics).unwrap_or(0) as f64;
+    let clock_memory = device.clock_info(Clock::Memory).unwrap_or(0) as f64;
+    let fan_percent = device.fan_speed(0).unwrap_or(0) as f64;
 
     Ok(GpuSnapshot {
-        name: fields[0].to_string(),
-        driver: fields[1].to_string(),
-        pcie_gen: fields[2].to_string(),
-        pcie_width: fields[3].to_string(),
-        vram_total_mib: fields[4].parse().unwrap_or(0.0),
-        vram_used_mib: fields[5].parse().unwrap_or(0.0),
-        gpu_util_pct: fields[7].parse().unwrap_or(0.0),
-        mem_util_pct: fields[8].parse().unwrap_or(0.0),
-        temp_celsius: fields[9].parse().unwrap_or(0.0),
-        power_watts: fields[10].parse().unwrap_or(0.0),
-        power_limit_watts: fields[11].parse().unwrap_or(0.0),
-        clock_gpu_mhz: fields[12].parse().unwrap_or(0.0),
-        clock_mem_mhz: fields[13].parse().unwrap_or(0.0),
-        fan_pct: fields[14].parse().unwrap_or(0.0),
+        name,
+        driver,
+        pcie_gen,
+        pcie_width,
+        vram_total_mib: memory.total as f64 / BYTES_PER_MIB,
+        vram_used_mib: memory.used as f64 / BYTES_PER_MIB,
+        gpu_util_pct: utilization.gpu as f64,
+        mem_util_pct: utilization.memory as f64,
+        temp_celsius: temperature,
+        power_watts: power_milliwatts / 1000.0,
+        power_limit_watts: power_limit_milliwatts / 1000.0,
+        clock_gpu_mhz: clock_graphics,
+        clock_mem_mhz: clock_memory,
+        fan_pct: fan_percent,
     })
 }
 
 pub fn read_gpu_processes() -> Vec<GpuProcess> {
-    let output = Command::new("nvidia-smi")
-        .args(["pmon", "-c", "1", "-s", "mu"])
-        .output();
-
-    let output = match output {
-        Ok(out) if out.status.success() => out,
-        _ => return Vec::new(),
+    let Ok(nvml) = nvml() else {
+        return Vec::new();
+    };
+    let Ok(device) = nvml.device_by_index(0) else {
+        return Vec::new();
     };
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    parse_pmon(&text)
+    let compute_processes = device.running_compute_processes().unwrap_or_default();
+    let graphics_processes = device.running_graphics_processes().unwrap_or_default();
+
+    let mut merged: Vec<GpuProcess> = Vec::new();
+    for process in &compute_processes {
+        merged.push(GpuProcess {
+            pid: process.pid,
+            name: read_process_name(process.pid),
+            proc_type: "C".to_string(),
+            vram_mib: used_memory_to_mib(&process.used_gpu_memory),
+            gpu_pct: None,
+            mem_pct: None,
+        });
+    }
+    for process in &graphics_processes {
+        if let Some(existing) = merged.iter_mut().find(|entry| entry.pid == process.pid) {
+            existing.proc_type = "C+G".to_string();
+        } else {
+            merged.push(GpuProcess {
+                pid: process.pid,
+                name: read_process_name(process.pid),
+                proc_type: "G".to_string(),
+                vram_mib: used_memory_to_mib(&process.used_gpu_memory),
+                gpu_pct: None,
+                mem_pct: None,
+            });
+        }
+    }
+    merged
 }
 
-fn parse_pmon(text: &str) -> Vec<GpuProcess> {
-    text.lines()
-        .filter(|line| !line.starts_with('#') && !line.is_empty())
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() < 12 {
-                return None;
-            }
+fn used_memory_to_mib(used: &UsedGpuMemory) -> u64 {
+    match used {
+        UsedGpuMemory::Used(bytes) => bytes / (1024 * 1024),
+        UsedGpuMemory::Unavailable => 0,
+    }
+}
 
-            let pid: u32 = fields[1].parse().ok()?;
-            let proc_type = fields[2].to_string();
-            let vram_mib: u64 = fields[3].parse().unwrap_or(0);
-            let gpu_pct = fields[5].parse::<f64>().ok();
-            let mem_pct = fields[6].parse::<f64>().ok();
-            let name = fields[11].to_string();
-
-            Some(GpuProcess {
-                pid,
-                name,
-                proc_type,
-                vram_mib,
-                gpu_pct,
-                mem_pct,
-            })
-        })
-        .collect()
+fn read_process_name(pid: u32) -> String {
+    fs::read_to_string(format!("/proc/{pid}/comm"))
+        .map(|contents| contents.trim().to_string())
+        .unwrap_or_else(|_| format!("pid {pid}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const GPU_CSV: &str = "NVIDIA GeForce RTX 3090, 590.48.01, 2, 16, 24576, 1481, 22644, 11, 10, 28, 24.13, 350.00, 480, 810, 0";
-
-    #[test]
-    fn test_parse_gpu_csv() {
-        let snap = parse_gpu_csv(GPU_CSV).unwrap();
-        assert_eq!(snap.name, "NVIDIA GeForce RTX 3090");
-        assert_eq!(snap.vram_total_mib, 24576.0);
-        assert_eq!(snap.vram_used_mib, 1481.0);
-        assert_eq!(snap.gpu_util_pct, 11.0);
-        assert_eq!(snap.temp_celsius, 28.0);
-        assert!((snap.power_watts - 24.13).abs() < 0.01);
+    fn sample_snapshot() -> GpuSnapshot {
+        GpuSnapshot {
+            name: "NVIDIA GeForce RTX 3090".to_string(),
+            driver: "590.48.01".to_string(),
+            pcie_gen: "4".to_string(),
+            pcie_width: "16".to_string(),
+            vram_total_mib: 24576.0,
+            vram_used_mib: 1481.0,
+            gpu_util_pct: 11.0,
+            mem_util_pct: 10.0,
+            temp_celsius: 28.0,
+            power_watts: 24.13,
+            power_limit_watts: 350.0,
+            clock_gpu_mhz: 480.0,
+            clock_mem_mhz: 810.0,
+            fan_pct: 0.0,
+        }
     }
 
     #[test]
     fn test_vram_pct() {
-        let snap = parse_gpu_csv(GPU_CSV).unwrap();
-        let pct = snap.vram_pct();
+        let pct = sample_snapshot().vram_pct();
         assert!(pct > 5.0 && pct < 10.0);
     }
 
     #[test]
     fn test_power_pct() {
-        let snap = parse_gpu_csv(GPU_CSV).unwrap();
-        let pct = snap.power_pct();
+        let pct = sample_snapshot().power_pct();
         assert!(pct > 5.0 && pct < 10.0);
-    }
-
-    const PMON_OUTPUT: &str = "\
-# gpu         pid   type     fb   ccpm     sm    mem    enc    dec    jpg    ofa    command
-# Idx           #    C/G     MB     MB      %      %      %      %      %      %    name
-    0       8548     G    912      0     12      9      -      -      -      -    Xorg
-    0       8788     G    110      0     15     11      -      -      -      -    gnome-shell
-    0     269934   C+G    127      0      -      -      -      -      -      -    zed-editor";
-
-    #[test]
-    fn test_parse_pmon() {
-        let procs = parse_pmon(PMON_OUTPUT);
-        assert_eq!(procs.len(), 3);
-        assert_eq!(procs[0].pid, 8548);
-        assert_eq!(procs[0].name, "Xorg");
-        assert_eq!(procs[0].vram_mib, 912);
-        assert_eq!(procs[0].gpu_pct, Some(12.0));
-        assert_eq!(procs[2].name, "zed-editor");
-        assert_eq!(procs[2].gpu_pct, None);
     }
 
     #[test]
@@ -206,7 +222,7 @@ mod tests {
         let snap = GpuSnapshot {
             vram_total_mib: 0.0,
             vram_used_mib: 100.0,
-            ..parse_gpu_csv(GPU_CSV).unwrap()
+            ..sample_snapshot()
         };
         assert_eq!(snap.vram_pct(), 0.0);
     }
@@ -216,82 +232,9 @@ mod tests {
         let snap = GpuSnapshot {
             power_limit_watts: 0.0,
             power_watts: 100.0,
-            ..parse_gpu_csv(GPU_CSV).unwrap()
+            ..sample_snapshot()
         };
         assert_eq!(snap.power_pct(), 0.0);
-    }
-
-    #[test]
-    fn test_header_line_format() {
-        let snap = parse_gpu_csv(GPU_CSV).unwrap();
-        let header = snap.header_line();
-        assert!(header.contains("NVIDIA GeForce RTX 3090"));
-        assert!(header.contains("PCIe Gen"));
-        assert!(header.contains("°C"));
-        assert!(header.contains("Fan"));
-    }
-
-    #[test]
-    fn test_vram_label_format() {
-        let snap = parse_gpu_csv(GPU_CSV).unwrap();
-        let label = snap.vram_label();
-        assert!(label.contains("VRAM:"));
-        assert!(label.contains("MiB"));
-        assert!(label.contains("%"));
-    }
-
-    #[test]
-    fn test_parse_gpu_csv_insufficient_fields() {
-        let result = parse_gpu_csv("too, few, fields");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_pmon_empty_input() {
-        let procs = parse_pmon("");
-        assert!(procs.is_empty());
-    }
-
-    #[test]
-    fn test_parse_pmon_header_only() {
-        let input = "\
-# gpu         pid   type     fb   ccpm     sm    mem    enc    dec    jpg    ofa    command
-# Idx           #    C/G     MB     MB      %      %      %      %      %      %    name";
-        let procs = parse_pmon(input);
-        assert!(procs.is_empty());
-    }
-
-    #[test]
-    fn test_parse_gpu_csv_bad_numeric_fields_default_to_zero() {
-        let line = "Test GPU, 590.48, 4, 16, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A, N/A";
-        let snap = parse_gpu_csv(line).unwrap();
-        assert_eq!(snap.name, "Test GPU");
-        assert_eq!(snap.vram_total_mib, 0.0);
-        assert_eq!(snap.gpu_util_pct, 0.0);
-        assert_eq!(snap.power_watts, 0.0);
-    }
-
-    #[test]
-    fn test_parse_pmon_short_line_skipped() {
-        let input = "0  1234  G  100";
-        let procs = parse_pmon(input);
-        assert!(procs.is_empty());
-    }
-
-    #[test]
-    fn test_vram_label_with_real_data() {
-        let snap = parse_gpu_csv(GPU_CSV).unwrap();
-        let label = snap.vram_label();
-        assert!(label.contains("1481"));
-        assert!(label.contains("24576"));
-    }
-
-    #[test]
-    fn test_header_line_contains_clocks() {
-        let snap = parse_gpu_csv(GPU_CSV).unwrap();
-        let header = snap.header_line();
-        assert!(header.contains("480MHz"), "expected GPU clock in header: {header}");
-        assert!(header.contains("810MHz"), "expected MEM clock in header: {header}");
     }
 
     #[test]
@@ -299,8 +242,51 @@ mod tests {
         let snap = GpuSnapshot {
             power_watts: 350.0,
             power_limit_watts: 350.0,
-            ..parse_gpu_csv(GPU_CSV).unwrap()
+            ..sample_snapshot()
         };
         assert!((snap.power_pct() - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_header_line_format() {
+        let header = sample_snapshot().header_line();
+        assert!(header.contains("NVIDIA GeForce RTX 3090"));
+        assert!(header.contains("PCIe Gen"));
+        assert!(header.contains("°C"));
+        assert!(header.contains("Fan"));
+    }
+
+    #[test]
+    fn test_header_line_contains_clocks() {
+        let header = sample_snapshot().header_line();
+        assert!(header.contains("480MHz"), "expected GPU clock in header: {header}");
+        assert!(header.contains("810MHz"), "expected MEM clock in header: {header}");
+    }
+
+    #[test]
+    fn test_vram_label_format() {
+        let label = sample_snapshot().vram_label();
+        assert!(label.contains("VRAM:"));
+        assert!(label.contains("MiB"));
+        assert!(label.contains("%"));
+    }
+
+    #[test]
+    fn test_vram_label_with_real_data() {
+        let label = sample_snapshot().vram_label();
+        assert!(label.contains("1481"));
+        assert!(label.contains("24576"));
+    }
+
+    #[test]
+    fn test_used_memory_to_mib_used() {
+        let mib = used_memory_to_mib(&UsedGpuMemory::Used(1024 * 1024 * 128));
+        assert_eq!(mib, 128);
+    }
+
+    #[test]
+    fn test_used_memory_to_mib_unavailable() {
+        let mib = used_memory_to_mib(&UsedGpuMemory::Unavailable);
+        assert_eq!(mib, 0);
     }
 }

@@ -199,24 +199,36 @@ fn parse_hex(hex: &str) -> Option<[u8; 3]> {
     Some([r, g, b])
 }
 
-/// Detect the terminal color palette from kitty config files.
+/// Detect the terminal color palette.
 ///
-/// Checks in order:
-/// 1. ~/.config/kitty/current-theme.conf (kitty theme override)
-/// 2. ~/.config/kitty/kitty.conf (main config, may include theme)
-///
-/// Extracts ANSI colors 0, 4, 6, 7 plus background/foreground.
-/// These slots have consistent semantic meaning across themes:
-///   color0 = dark surface, color4 = blue, color6 = cyan/teal, color7 = light
+/// Tries OSC color queries first (works with any modern terminal: kitty,
+/// ghostty, alacritty, wezterm, foot, xterm), then falls back to parsing
+/// kitty config files, then to a Catppuccin Mocha default.
 pub fn detect() -> ThemePalette {
-    let home = match std::env::var("HOME") {
-        Ok(h) => PathBuf::from(h),
-        Err(_) => return ThemePalette::default(),
-    };
+    let queried = sysmon_shared::terminal_theme::query();
+    let defaults = ThemePalette::default();
+    if queried.bg != Palette::default().bg || queried.colors != Palette::default().colors {
+        return ThemePalette {
+            bg: queried.bg,
+            colors: queried.colors[..8].try_into().unwrap(),
+        };
+    }
+    detect_from_kitty_config().unwrap_or(defaults)
+}
 
+use sysmon_shared::terminal_theme::Palette;
+
+fn detect_from_kitty_config() -> Option<ThemePalette> {
     let config_dir = std::env::var("KITTY_CONF_DIR")
+        .or_else(|_| {
+            std::env::var("XDG_CONFIG_HOME")
+                .map(|base| format!("{base}/kitty"))
+        })
         .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".config").join("kitty"));
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home).join(".config").join("kitty")
+        });
 
     let mut colors = std::collections::HashMap::new();
 
@@ -251,10 +263,10 @@ pub fn detect() -> ThemePalette {
             palette_colors[i] = c;
         }
     }
-    ThemePalette {
+    Some(ThemePalette {
         bg: get("background").unwrap_or(defaults.bg),
         colors: palette_colors,
-    }
+    })
 }
 
 #[cfg(test)]

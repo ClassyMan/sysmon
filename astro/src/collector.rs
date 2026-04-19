@@ -1,5 +1,6 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -11,8 +12,13 @@ const APOD_BASE_URL: &str = "https://api.nasa.gov/planetary/apod";
 const MAX_IMAGE_DIM: u32 = 800;
 
 fn cache_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".cache").join("sysmon").join("astro")
+    let base = std::env::var("XDG_CACHE_HOME")
+        .or_else(|_| std::env::var("SNAP_USER_COMMON").map(|s| format!("{s}/.cache")))
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            format!("{home}/.cache")
+        });
+    PathBuf::from(base).join("sysmon").join("astro")
 }
 
 fn ensure_cache_dir() -> PathBuf {
@@ -305,11 +311,15 @@ fn do_fetch(
             }
         },
         Err(e) => {
-            let mut state = shared.lock().unwrap();
-            if state.entries.is_none() {
-                // Show full error chain for diagnosis
-                state.error = Some(format!("Fetch: {e:#}"));
+            let mut chain = format!("{e}");
+            let mut source: Option<&dyn std::error::Error> = std::error::Error::source(&e);
+            while let Some(s) = source {
+                chain.push_str(&format!(" -> {s}"));
+                source = s.source();
             }
+            eprintln!("astro fetch error: {chain}");
+            let mut state = shared.lock().unwrap();
+            state.error = Some(format!("Fetch: {chain}"));
         }
     }
 }
@@ -327,18 +337,20 @@ pub fn spawn_fetcher(shared: Arc<Mutex<FetchState>>) -> thread::JoinHandle<()> {
         state.entries_updated = true;
     }
 
-    // Build client and do initial fetch on the main thread where networking works.
+    // Build client on the main thread where networking works.
     // reqwest::blocking creates an internal tokio runtime whose DNS resolver
     // can fail when the client is constructed inside thread::spawn.
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
+        .user_agent("sysmon-astro/0.1")
+        .http1_only()
+        .local_address(IpAddr::V4(Ipv4Addr::UNSPECIFIED))
         .build()
         .expect("failed to build HTTP client");
 
-    let api_key = shared.lock().unwrap().api_key.clone();
-    do_fetch(&client, &shared, &api_key);
-
     thread::spawn(move || {
+        let api_key = shared.lock().unwrap().api_key.clone();
+        do_fetch(&client, &shared, &api_key);
         let mut last_fetch = Instant::now();
 
         loop {

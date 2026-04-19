@@ -41,11 +41,11 @@ pub fn render(frame: &mut Frame, area: Rect) {
                 Span::styled(
                     format!("{:>14}", key),
                     Style::default()
-                        .fg(theme::SELECTED_TAB_COLOR)
+                        .fg(theme::selected_tab_color())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
-                Span::styled(*desc, Style::default().fg(theme::LABEL_COLOR)),
+                Span::styled(*desc, Style::default().fg(theme::label_color())),
             ])
         })
         .collect();
@@ -54,7 +54,7 @@ pub fn render(frame: &mut Frame, area: Rect) {
         Block::default()
             .title(" Keybindings ")
             .borders(Borders::ALL)
-            .style(Style::default().fg(theme::HELP_BORDER_COLOR)),
+            .style(Style::default().fg(theme::help_border_color())),
     );
 
     frame.render_widget(help, popup_area);

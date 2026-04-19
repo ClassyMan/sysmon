@@ -1,4 +1,8 @@
 use ratatui::style::Color;
+use sysmon_shared::terminal_theme::palette;
+
+const RX_SLOT: usize = 10; // bright green
+const TX_SLOT: usize = 11; // bright yellow-green
 
 // Half-width katakana (U+FF65..FF9F) — same range the real Matrix used
 const KATAKANA_START: u32 = 0xFF65;
@@ -25,26 +29,16 @@ pub struct TrailCell {
 
 impl TrailCell {
     pub fn color(&self, is_rx: bool) -> Color {
-        if is_rx {
-            match self.age {
-                0 => Color::Rgb(220, 255, 255),
-                1 => Color::Rgb(100, 230, 220),
-                2 => Color::Rgb(60, 190, 180),
-                3 => Color::Rgb(35, 150, 140),
-                4 => Color::Rgb(20, 110, 100),
-                5 => Color::Rgb(10, 70, 65),
-                _ => Color::Rgb(5, 35, 30),
-            }
-        } else {
-            match self.age {
-                0 => Color::Rgb(240, 220, 255),
-                1 => Color::Rgb(200, 140, 255),
-                2 => Color::Rgb(160, 100, 220),
-                3 => Color::Rgb(120, 70, 180),
-                4 => Color::Rgb(85, 45, 140),
-                5 => Color::Rgb(55, 25, 100),
-                _ => Color::Rgb(30, 12, 55),
-            }
+        let p = palette();
+        let slot = if is_rx { RX_SLOT } else { TX_SLOT };
+        match self.age {
+            0 => p.mix_with_fg(slot, 0.4),       // bright head, mostly fg with accent tint
+            1 => p.slot_color(slot),             // full accent
+            2 => p.mix_with_bg(slot, 0.75),      // start fading
+            3 => p.mix_with_bg(slot, 0.55),
+            4 => p.mix_with_bg(slot, 0.35),
+            5 => p.mix_with_bg(slot, 0.20),
+            _ => p.mix_with_bg(slot, 0.10),      // nearly bg
         }
     }
 }

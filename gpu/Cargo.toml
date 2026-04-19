@@ -11,3 +11,4 @@ ratatui = "0.30"
 crossterm = "0.29"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+nvml-wrapper = "0.11"

@@ -6,7 +6,7 @@ mod ui;
 
 use std::io;
 use std::panic;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::Parser;
@@ -15,9 +15,13 @@ use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::execute;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui_image::picker::Picker;
 
 use crate::app::App;
 use crate::input::map_key;
+use crate::ui::animation::AnimatedGif;
+
+const FRAME_INTERVAL: Duration = Duration::from_millis(80);
 
 #[derive(Parser)]
 #[command(
@@ -42,7 +46,12 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Query the terminal graphics capability BEFORE raw mode — the query reads
+    // stdin synchronously and is easier to reason about without it.
+    let picker = Picker::from_query_stdio().ok();
+
     terminal::enable_raw_mode()?;
+    sysmon_shared::terminal_theme::init();
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
@@ -56,7 +65,7 @@ fn main() -> Result<()> {
         default_hook(info);
     }));
 
-    let result = run(&mut terminal, cli);
+    let result = run(&mut terminal, cli, picker);
 
     terminal::disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -65,20 +74,33 @@ fn main() -> Result<()> {
     result
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Result<()> {
+fn run(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    cli: Cli,
+    picker: Option<Picker>,
+) -> Result<()> {
     let mut app = App::new(cli.refresh, cli.scrollback, cli.all);
+    if let Some(mut picker) = picker {
+        app.animation = AnimatedGif::load_drive(&mut picker);
+    }
 
     app.tick()?;
 
     let mut last_tick = Instant::now();
+    let mut last_frame;
 
     loop {
-        terminal.draw(|frame| ui::render(frame, &app))?;
+        terminal.draw(|frame| ui::render(frame, &mut app))?;
+        last_frame = Instant::now();
 
-        let timeout = app
+        let until_tick = app
             .refresh_rate
             .checked_sub(last_tick.elapsed())
             .unwrap_or_default();
+        let until_frame = FRAME_INTERVAL
+            .checked_sub(last_frame.elapsed())
+            .unwrap_or_default();
+        let timeout = until_tick.min(until_frame);
 
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {

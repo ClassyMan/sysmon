@@ -2,16 +2,17 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::{App, ViewMode};
 use crate::collector::human_rate;
 use sysmon_shared::line_chart::{self, LineChart};
+use sysmon_shared::terminal_theme::palette;
 
-const DOWN_COLOR: Color = Color::Rgb(100, 230, 220);
-const UP_COLOR: Color = Color::Rgb(180, 120, 255);
-const BORDER_COLOR: Color = Color::DarkGray;
-const LABEL_COLOR: Color = Color::Gray;
+fn down_color() -> Color { palette().bright_green() }
+fn up_color() -> Color { palette().bright_yellow() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
 
 pub fn render(frame: &mut Frame, app: &App) {
     render_in(frame, frame.area(), app);
@@ -20,12 +21,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(6),
-            Constraint::Length(3),
-            Constraint::Length(3),
-        ])
+        .constraints([Constraint::Length(1), Constraint::Min(4)])
         .split(area);
 
     draw_header(frame, outer[0], app);
@@ -33,13 +29,11 @@ pub fn render_in(frame: &mut Frame, area: Rect, app: &App) {
         ViewMode::Charts => draw_charts(frame, outer[1], app),
         ViewMode::Rain => draw_rain(frame, outer[1], app),
     }
-    draw_rx_gauge(frame, outer[2], app);
-    draw_tx_gauge(frame, outer[3], app);
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let fast_span = if app.fast_mode {
-        Span::styled(" FAST ", Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD))
+        Span::styled(" FAST ", Style::default().fg(palette().bg_color()).bg(palette().bright_yellow()).add_modifier(Modifier::BOLD))
     } else {
         Span::raw("")
     };
@@ -56,11 +50,11 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     });
 
     let text = Paragraph::new(Line::from(vec![
-        Span::styled(" NET ", Style::default().fg(DOWN_COLOR).add_modifier(Modifier::BOLD)),
+        Span::styled(" NET ", Style::default().fg(down_color()).add_modifier(Modifier::BOLD)),
         fast_span,
         Span::styled(
             format!(" {} | {}ms | {}s ", hw_info, app.refresh_ms, app.scrollback_secs),
-            Style::default().fg(LABEL_COLOR),
+            Style::default().fg(label_color()),
         ),
     ]));
     frame.render_widget(text, area);
@@ -92,14 +86,14 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
 
     let rx_chart = LineChart::new(vec![line_chart::Dataset {
         data: &rx_data,
-        color: DOWN_COLOR,
+        color: down_color(),
         name: rx_label,
     }])
     .block(
         Block::default()
             .title(" Download ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(BORDER_COLOR)),
+            .border_style(Style::default().fg(border_color())),
     )
     .x_bounds([0.0, capacity - 1.0])
     .y_bounds([0.0, rx_max])
@@ -108,14 +102,14 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
 
     let tx_chart = LineChart::new(vec![line_chart::Dataset {
         data: &tx_data,
-        color: UP_COLOR,
+        color: up_color(),
         name: tx_label,
     }])
     .block(
         Block::default()
             .title(" Upload ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(BORDER_COLOR)),
+            .border_style(Style::default().fg(border_color())),
     )
     .x_bounds([0.0, capacity - 1.0])
     .y_bounds([0.0, tx_max])
@@ -129,13 +123,15 @@ fn draw_charts(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_rain(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(BORDER_COLOR));
+        .border_style(Style::default().fg(border_color()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     if inner.height < 2 || inner.width < 2 {
         return;
     }
+
+    app.rain_panel_size.set(Some((inner.width, inner.height)));
 
     let half = inner.height / 2;
     let divider_row = inner.y + half;
@@ -145,7 +141,7 @@ fn draw_rain(frame: &mut Frame, area: Rect, app: &App) {
     for col in inner.x..inner.right() {
         if let Some(cell) = buf.cell_mut((col, divider_row)) {
             cell.set_char('·');
-            cell.set_style(Style::default().fg(Color::Rgb(40, 40, 40)));
+            cell.set_style(Style::default().fg(palette().mix_with_bg(0, 0.5)));
         }
     }
 
@@ -159,14 +155,14 @@ fn draw_rain(frame: &mut Frame, area: Rect, app: &App) {
         inner.x + 1,
         divider_row,
         &rx_label,
-        Style::default().fg(DOWN_COLOR).add_modifier(Modifier::BOLD),
+        Style::default().fg(down_color()).add_modifier(Modifier::BOLD),
     );
     let tx_x = inner.right().saturating_sub(tx_label.len() as u16 + 1);
     buf.set_string(
         tx_x,
         divider_row,
         &tx_label,
-        Style::default().fg(UP_COLOR).add_modifier(Modifier::BOLD),
+        Style::default().fg(up_color()).add_modifier(Modifier::BOLD),
     );
 
     // Render matrix streams
@@ -187,36 +183,6 @@ fn draw_rain(frame: &mut Frame, area: Rect, app: &App) {
             }
         }
     }
-}
-
-fn draw_rx_gauge(frame: &mut Frame, area: Rect, app: &App) {
-    let rx_rate = app.latest_rates.as_ref().map_or(0.0, |r| r.rx_bytes_per_sec);
-    let rx_max = app.rx_y.current().max(1.0);
-    let pct = (rx_rate / rx_max * 100.0).clamp(0.0, 100.0);
-    let label = format!("Down: {}", human_rate(rx_rate));
-
-    let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BORDER_COLOR)))
-        .gauge_style(Style::default().fg(DOWN_COLOR).add_modifier(Modifier::BOLD))
-        .label(Span::styled(label, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
-        .ratio(pct / 100.0);
-
-    frame.render_widget(gauge, area);
-}
-
-fn draw_tx_gauge(frame: &mut Frame, area: Rect, app: &App) {
-    let tx_rate = app.latest_rates.as_ref().map_or(0.0, |r| r.tx_bytes_per_sec);
-    let tx_max = app.tx_y.current().max(1.0);
-    let pct = (tx_rate / tx_max * 100.0).clamp(0.0, 100.0);
-    let label = format!("Up: {}", human_rate(tx_rate));
-
-    let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(BORDER_COLOR)))
-        .gauge_style(Style::default().fg(UP_COLOR).add_modifier(Modifier::BOLD))
-        .label(Span::styled(label, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
-        .ratio(pct / 100.0);
-
-    frame.render_widget(gauge, area);
 }
 
 fn auto_scale(observed_max: f64) -> f64 {

@@ -6,11 +6,13 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::app::{App, ViewMode};
 use crate::collector::DecodedImage;
+use sysmon_shared::terminal_theme::palette;
 
-const ASTRO_COLOR: Color = Color::Rgb(180, 140, 255);
-const BORDER_COLOR: Color = Color::DarkGray;
-const LABEL_COLOR: Color = Color::Gray;
-const NAV_COLOR: Color = Color::Rgb(100, 200, 255);
+fn astro_color() -> Color { palette().bright_cyan() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
+fn nav_color() -> Color { palette().bright_cyan() }
+fn mode_color() -> Color { palette().bright_yellow() }
 
 use crate::theme::ThemePalette;
 
@@ -51,7 +53,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let mode_span = Span::styled(
         format!(" [{}] ", app.view_mode.label()),
         Style::default()
-            .fg(Color::Rgb(255, 180, 100))
+            .fg(mode_color())
             .add_modifier(Modifier::BOLD),
     );
 
@@ -59,12 +61,12 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(
             " ASTRO ",
             Style::default()
-                .fg(ASTRO_COLOR)
+                .fg(astro_color())
                 .add_modifier(Modifier::BOLD),
         ),
         mode_span,
-        Span::styled(title, Style::default().fg(Color::White)),
-        Span::styled(status, Style::default().fg(LABEL_COLOR)),
+        Span::styled(title, Style::default().fg(palette().fg_color())),
+        Span::styled(status, Style::default().fg(label_color())),
     ]));
     frame.render_widget(text, area);
 }
@@ -79,11 +81,11 @@ fn draw_content(frame: &mut Frame, area: Rect, app: &App) {
                 "Fetching astronomy picture of the day..."
             };
             let placeholder = Paragraph::new(msg)
-                .style(Style::default().fg(LABEL_COLOR))
+                .style(Style::default().fg(label_color()))
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .border_style(Style::default().fg(BORDER_COLOR)),
+                        .border_style(Style::default().fg(border_color())),
                 );
             frame.render_widget(placeholder, area);
             return;
@@ -108,7 +110,7 @@ fn draw_image_panel(
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(BORDER_COLOR));
+        .border_style(Style::default().fg(border_color()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -123,7 +125,7 @@ fn draw_image_panel(
         } else {
             "Loading image..."
         };
-        let p = Paragraph::new(msg).style(Style::default().fg(LABEL_COLOR));
+        let p = Paragraph::new(msg).style(Style::default().fg(label_color()));
         frame.render_widget(p, inner);
         return;
     }
@@ -141,7 +143,7 @@ fn draw_ascii_art(frame: &mut Frame, area: Rect, entry: &crate::collector::ApodE
         Some(a) => a,
         None => {
             let p = Paragraph::new("Generating ASCII art...")
-                .style(Style::default().fg(LABEL_COLOR));
+                .style(Style::default().fg(label_color()));
             frame.render_widget(p, area);
             return;
         }
@@ -178,10 +180,10 @@ fn draw_ascii_art(frame: &mut Frame, area: Rect, entry: &crate::collector::ApodE
                 if let Some(&rgb) = img.pixels.get(idx) {
                     Color::Rgb(rgb[0], rgb[1], rgb[2])
                 } else {
-                    LABEL_COLOR
+                    label_color()
                 }
             } else {
-                LABEL_COLOR
+                label_color()
             };
 
             if let Some(cell) = buf.cell_mut((x, y)) {
@@ -197,7 +199,7 @@ fn draw_pixel_art(frame: &mut Frame, area: Rect, entry: &crate::collector::ApodE
         Some(img) => img,
         None => {
             let p = Paragraph::new("Loading image...")
-                .style(Style::default().fg(LABEL_COLOR));
+                .style(Style::default().fg(label_color()));
             frame.render_widget(p, area);
             return;
         }
@@ -238,7 +240,7 @@ fn draw_themed_art(frame: &mut Frame, area: Rect, entry: &crate::collector::Apod
         Some(img) => img,
         None => {
             let p = Paragraph::new("Loading image...")
-                .style(Style::default().fg(LABEL_COLOR));
+                .style(Style::default().fg(label_color()));
             frame.render_widget(p, area);
             return;
         }
@@ -278,7 +280,7 @@ fn draw_photo(frame: &mut Frame, area: Rect, entry: &crate::collector::ApodEntry
         Some(img) => img,
         None => {
             let p = Paragraph::new("Loading image...")
-                .style(Style::default().fg(LABEL_COLOR));
+                .style(Style::default().fg(label_color()));
             frame.render_widget(p, area);
             return;
         }
@@ -351,7 +353,7 @@ fn draw_text_panel(
 ) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(BORDER_COLOR));
+        .border_style(Style::default().fg(border_color()));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -364,20 +366,20 @@ fn draw_text_panel(
     lines.push(Line::from(Span::styled(
         &entry.title,
         Style::default()
-            .fg(ASTRO_COLOR)
+            .fg(astro_color())
             .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
 
     lines.push(Line::from(Span::styled(
         &entry.date,
-        Style::default().fg(LABEL_COLOR),
+        Style::default().fg(label_color()),
     )));
 
     if let Some(ref cr) = entry.copyright {
         lines.push(Line::from(Span::styled(
             format!("Credit: {cr}"),
-            Style::default().fg(LABEL_COLOR),
+            Style::default().fg(label_color()),
         )));
     }
 
@@ -390,14 +392,14 @@ fn draw_text_panel(
     lines.push(Line::from(Span::styled(
         url,
         Style::default()
-            .fg(NAV_COLOR)
+            .fg(nav_color())
             .add_modifier(Modifier::UNDERLINED),
     )));
     lines.push(Line::from(""));
 
     lines.push(Line::from(Span::styled(
         &entry.explanation,
-        Style::default().fg(Color::White),
+        Style::default().fg(palette().fg_color()),
     )));
 
     let paragraph = Paragraph::new(lines)
@@ -414,14 +416,15 @@ fn draw_navigation(frame: &mut Frame, area: Rect, app: &App) {
     let total = app.entries.len();
     let current = app.selected + 1;
     let text = Paragraph::new(Line::from(vec![
-        Span::styled(" \u{2190} k ", Style::default().fg(NAV_COLOR)),
+        Span::styled(" \u{2190} h ", Style::default().fg(nav_color())),
         Span::styled(
             format!("[{current}/{total}]"),
             Style::default()
-                .fg(Color::White)
+                .fg(palette().fg_color())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" j \u{2192} ", Style::default().fg(NAV_COLOR)),
+        Span::styled(" l \u{2192} ", Style::default().fg(nav_color())),
+        Span::styled("\u{2191}\u{2193} scroll", Style::default().fg(nav_color())),
     ]));
     frame.render_widget(text, area);
 }

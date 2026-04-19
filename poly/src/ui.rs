@@ -7,20 +7,24 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use crate::app::App;
 use crate::collector::human_volume;
 use sysmon_shared::line_chart::{self, LineChart};
+use sysmon_shared::terminal_theme::palette;
 
-const POLY_COLOR: Color = Color::Rgb(120, 200, 255);
-const BORDER_COLOR: Color = Color::DarkGray;
-const LABEL_COLOR: Color = Color::Gray;
-const SELECTED_BG: Color = Color::Rgb(30, 40, 60);
-const MUTED_COLOR: Color = Color::Rgb(100, 100, 100);
+fn poly_color() -> Color { palette().bright_cyan() }
+fn border_color() -> Color { palette().muted_label() }
+fn label_color() -> Color { palette().muted_label() }
+fn selected_bg() -> Color { palette().mix_with_bg(14, 0.25) }
+fn muted_color() -> Color { palette().mix_with_bg(7, 0.4) }
+fn topic_color() -> Color { palette().bright_cyan() }
+fn sort_color() -> Color { palette().bright_yellow() }
 
 fn price_color(pct: f64) -> Color {
+    let p = palette();
     if pct >= 60.0 {
-        Color::Rgb(100, 255, 100)
+        p.bright_green()
     } else if pct >= 40.0 {
-        Color::Rgb(255, 220, 100)
+        p.bright_yellow()
     } else {
-        Color::Rgb(255, 100, 100)
+        p.bright_red()
     }
 }
 
@@ -56,13 +60,13 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let topic_span = Span::styled(
         format!(" [{}] ", app.topic.label()),
         Style::default()
-            .fg(Color::Rgb(180, 140, 255))
+            .fg(topic_color())
             .add_modifier(Modifier::BOLD),
     );
     let sort_span = Span::styled(
         format!(" [{}] ", app.sort_order.label()),
         Style::default()
-            .fg(Color::Rgb(255, 180, 100))
+            .fg(sort_color())
             .add_modifier(Modifier::BOLD),
     );
 
@@ -70,7 +74,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         Span::styled(
             " POLY ",
             Style::default()
-                .fg(POLY_COLOR)
+                .fg(poly_color())
                 .add_modifier(Modifier::BOLD),
         ),
         topic_span,
@@ -82,7 +86,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
                 app.refresh_ms / 1000,
                 app.events.len()
             ),
-            Style::default().fg(LABEL_COLOR),
+            Style::default().fg(label_color()),
         ),
     ]));
     frame.render_widget(text, area);
@@ -92,7 +96,7 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(" Trending Events ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(BORDER_COLOR));
+        .border_style(Style::default().fg(border_color()));
 
     if app.events.is_empty() {
         let msg = if app.last_error.is_some() {
@@ -101,7 +105,7 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &App) {
             "Fetching events..."
         };
         let placeholder = Paragraph::new(msg)
-            .style(Style::default().fg(LABEL_COLOR))
+            .style(Style::default().fg(label_color()))
             .block(block);
         frame.render_widget(placeholder, area);
         return;
@@ -112,7 +116,7 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &App) {
         .map(|header| {
             Cell::from(*header).style(
                 Style::default()
-                    .fg(POLY_COLOR)
+                    .fg(poly_color())
                     .add_modifier(Modifier::BOLD),
             )
         });
@@ -131,16 +135,16 @@ fn draw_table(frame: &mut Frame, area: Rect, app: &App) {
         let vol_str = human_volume(event.total_volume_24h);
 
         let row_style = if is_selected {
-            Style::default().bg(SELECTED_BG).fg(Color::White)
+            Style::default().bg(selected_bg()).fg(palette().fg_color())
         } else {
-            Style::default().fg(LABEL_COLOR)
+            Style::default().fg(label_color())
         };
 
         Row::new(vec![
             Cell::from(marker),
             Cell::from(event.title.clone()),
             Cell::from(price_str).style(Style::default().fg(price_color(lead_price))),
-            Cell::from(mkts_str).style(Style::default().fg(MUTED_COLOR)),
+            Cell::from(mkts_str).style(Style::default().fg(muted_color())),
             Cell::from(vol_str),
         ])
         .style(row_style)
@@ -172,12 +176,12 @@ fn draw_chart(frame: &mut Frame, area: Rect, app: &App) {
             "Loading price history..."
         };
         let placeholder = Paragraph::new(msg)
-            .style(Style::default().fg(LABEL_COLOR))
+            .style(Style::default().fg(label_color()))
             .block(
                 Block::default()
                     .title(title)
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(BORDER_COLOR)),
+                    .border_style(Style::default().fg(border_color())),
             );
         frame.render_widget(placeholder, area);
         return;
@@ -206,14 +210,14 @@ fn draw_chart(frame: &mut Frame, area: Rect, app: &App) {
 
     let chart = LineChart::new(vec![line_chart::Dataset {
         data: &app.price_history,
-        color: POLY_COLOR,
+        color: poly_color(),
         name: label,
     }])
     .block(
         Block::default()
             .title(title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(BORDER_COLOR)),
+            .border_style(Style::default().fg(border_color())),
     )
     .x_bounds([0.0, (data_len - 1.0).max(1.0)])
     .y_bounds([y_floor, y_ceil])
@@ -221,7 +225,7 @@ fn draw_chart(frame: &mut Frame, area: Rect, app: &App) {
     .y_labels([format!("{:.0}%", y_floor), format!("{:.0}%", y_ceil)])
     .rounded(true)
     .left_aligned(true)
-    .direction_colors(Color::Rgb(100, 255, 100), Color::Rgb(255, 100, 100));
+    .direction_colors(palette().bright_green(), palette().bright_red());
 
     frame.render_widget(chart, area);
 }
@@ -362,16 +366,16 @@ mod tests {
 
     #[test]
     fn test_price_color_high() {
-        assert!(matches!(price_color(75.0), Color::Rgb(100, 255, 100)));
+        assert_eq!(price_color(75.0), palette().bright_green());
     }
 
     #[test]
     fn test_price_color_mid() {
-        assert!(matches!(price_color(50.0), Color::Rgb(255, 220, 100)));
+        assert_eq!(price_color(50.0), palette().bright_yellow());
     }
 
     #[test]
     fn test_price_color_low() {
-        assert!(matches!(price_color(20.0), Color::Rgb(255, 100, 100)));
+        assert_eq!(price_color(20.0), palette().bright_red());
     }
 }

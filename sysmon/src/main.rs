@@ -10,8 +10,9 @@ use clap::Parser;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use ratatui_image::picker::Picker;
 use ratatui::backend::CrosstermBackend;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
 use ratatui::Terminal;
 
@@ -38,6 +39,8 @@ struct Cli {
     poly: bool,
     #[arg(long)]
     astro: bool,
+    #[arg(long)]
+    audio: bool,
 
     /// Refresh interval in milliseconds
     #[arg(short = 'r', long, default_value = "500")]
@@ -51,7 +54,10 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    let picker = Picker::from_query_stdio().ok();
+
     terminal::enable_raw_mode()?;
+    sysmon_shared::terminal_theme::init();
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
@@ -64,7 +70,7 @@ fn main() -> Result<()> {
         default_hook(info);
     }));
 
-    let result = run(&mut terminal, cli);
+    let result = run(&mut terminal, cli, picker);
 
     terminal::disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -73,8 +79,8 @@ fn main() -> Result<()> {
     result
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Result<()> {
-    let any_selected = cli.cpu || cli.gpu || cli.ram || cli.dio || cli.net || cli.poly || cli.astro;
+fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli, mut picker: Option<Picker>) -> Result<()> {
+    let any_selected = cli.cpu || cli.gpu || cli.ram || cli.dio || cli.net || cli.poly || cli.astro || cli.audio;
 
     let mut panels: Vec<Panel> = Vec::new();
 
@@ -92,7 +98,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Resul
         panels.push(Panel::new_ram(cli.refresh, cli.scrollback)?);
     }
     if cli.dio {
-        panels.push(Panel::new_dio(cli.refresh, cli.scrollback)?);
+        panels.push(Panel::new_dio(cli.refresh, cli.scrollback, picker.as_mut())?);
     }
     if want_net {
         panels.push(Panel::new_net(cli.refresh, cli.scrollback)?);
@@ -102,6 +108,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Resul
     }
     if cli.astro {
         panels.push(Panel::new_astro("2hDbCHnvukvQdR356ptvqGRJ1C0ud5S5TxUOO4Pr".to_string()));
+    }
+    if cli.audio {
+        panels.push(Panel::new_audio()?);
     }
 
     if panels.is_empty() {
@@ -114,13 +123,13 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Resul
         .position(|p| matches!(p, Panel::Poly { .. }))
         .unwrap_or(0);
 
-    let focus_color = Color::Rgb(120, 200, 255);
-    let unfocused_color = Color::DarkGray;
+    let focus_color = sysmon_shared::terminal_theme::palette().bright_cyan();
+    let unfocused_color = sysmon_shared::terminal_theme::palette().surface();
 
     loop {
         terminal.draw(|frame| {
             let rects = layout::compute_grid(frame.area(), panels.len());
-            for (i, (panel, &rect)) in panels.iter().zip(rects.iter()).enumerate() {
+            for (i, (panel, &rect)) in panels.iter_mut().zip(rects.iter()).enumerate() {
                 let border_color = if i == focused { focus_color } else { unfocused_color };
                 let block = Block::default()
                     .title(format!(" {} ", panel.name()))
@@ -142,7 +151,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, cli: Cli) -> Resul
                     .unwrap_or_default()
             })
             .min()
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .min(std::time::Duration::from_millis(80));
 
         if event::poll(min_remaining)? {
             if let Event::Key(key) = event::read()? {
